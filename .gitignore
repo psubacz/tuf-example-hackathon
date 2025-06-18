@@ -1,0 +1,98 @@
+# TUF Repository Generated Files
+tuf-repository/
+client-cache/
+
+# Go Build Artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# Go Module Cache
+go.sum
+
+# IDE and Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary Files
+*.tmp
+*.temp
+*.log
+
+# Backup Files
+*.bak
+*.backup
+
+# Coverage Reports
+*.cover
+coverage.txt
+coverage.html
+
+# Binaries
+/bin/
+/dist/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Debug Files
+debug
+debug.test
+*.pprof
+
+# Air (Go live reload)
+tmp/
+
+# Delve debugger
+__debug_bin*
+
+# GoLand
+.idea/
+
+# VS Code
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+Session.vim
+Sessionx.vim
+.netrwhist
+*~
+tags
+[._]*.un~
