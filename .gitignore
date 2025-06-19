@@ -1,5 +1,6 @@
 # TUF Repository Generated Files
 tuf-repository/
+network-client-cache/
 client-cache/
 
 # Go Build Artifacts
