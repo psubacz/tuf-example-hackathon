@@ -3,7 +3,6 @@ package tuf
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 
 	"github.com/theupdateframework/go-tuf/v2/metadata"
@@ -14,6 +13,7 @@ type KeyPair struct {
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
 	KeyID      string
+	tufKey     *metadata.Key // Store the go-tuf v2 key object
 }
 
 // GenerateED25519Key generates a new Ed25519 key pair
@@ -23,25 +23,24 @@ func GenerateED25519Key() (*KeyPair, error) {
 		return nil, fmt.Errorf("failed to generate Ed25519 key: %w", err)
 	}
 
-	// Create key ID from public key (simplified - in production use proper key ID generation)
-	keyID := hex.EncodeToString(pub)[:16] // Use first 16 chars as key ID
+	// Use go-tuf v2's key ID generation to ensure consistency
+	tufKey, err := metadata.KeyFromPublicKey(pub)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create TUF key: %w", err)
+	}
 
 	return &KeyPair{
 		PublicKey:  pub,
 		PrivateKey: priv,
-		KeyID:      keyID,
+		KeyID:      tufKey.ID(), // Use the key ID from go-tuf v2
+		tufKey:     tufKey,           // Store the TUF key for later use
 	}, nil
 }
 
 // ToTUFKey converts the key pair to a TUF metadata Key
 func (kp *KeyPair) ToTUFKey() *metadata.Key {
-	return &metadata.Key{
-		Type:   metadata.KeyTypeEd25519,
-		Scheme: metadata.KeyTypeEd25519,
-		Value: metadata.KeyVal{
-			PublicKey: hex.EncodeToString(kp.PublicKey),
-		},
-	}
+	// Return the properly generated go-tuf v2 key
+	return kp.tufKey
 }
 
 // GetKeyID returns the key identifier
@@ -136,5 +135,15 @@ func (km *KeyManager) GetRoles() map[string]*metadata.Role {
 			KeyIDs:    []string{km.timestampKey.GetKeyID()},
 			Threshold: 1,
 		},
+	}
+}
+
+// GetKeyPairs returns all key pairs mapped by role name
+func (km *KeyManager) GetKeyPairs() map[string]*KeyPair {
+	return map[string]*KeyPair{
+		"root":      km.rootKey,
+		"targets":   km.targetsKey,
+		"snapshot":  km.snapshotKey,
+		"timestamp": km.timestampKey,
 	}
 }

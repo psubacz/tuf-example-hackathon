@@ -89,11 +89,15 @@ func (r *RepositoryV2) createMetadataV2() error {
 	rootMetadata := metadata.Root(expirationTime)
 	rootMetadata.Signed.Version = 1
 
-	// Use generated keys and roles
-	rootMetadata.Signed.Keys = keyManager.GetKeys()
-	rootMetadata.Signed.Roles = keyManager.GetRoles()
+	// Add keys to root metadata using proper go-tuf v2 API
+	for roleName, keyPair := range keyManager.GetKeyPairs() {
+		err := rootMetadata.Signed.AddKey(keyPair.ToTUFKey(), roleName)
+		if err != nil {
+			return fmt.Errorf("failed to add key for role %s: %w", roleName, err)
+		}
+	}
 
-	fmt.Printf("✅ Generated %d cryptographic keys for TUF roles\n", len(rootMetadata.Signed.Keys))
+	fmt.Printf("✅ Generated %d cryptographic keys for TUF roles\n", len(keyManager.GetKeyPairs()))
 
 	// Create targets metadata using factory function
 	targetsMetadata := metadata.Targets(expirationTime)
