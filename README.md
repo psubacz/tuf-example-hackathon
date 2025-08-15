@@ -31,7 +31,7 @@ The Update Framework (TUF) is a framework for securing software update systems. 
 ```
 tuf-golang-project/
 ├── cmd/                         # Main applications
-│   ├── tuf-init/               # Repository initialization
+│   ├── tuf-server/             # Repository initialization & server
 │   └── tuf-client/             # go-tuf v2 client
 ├── internal/                   # Private application code
 │   ├── tuf/                   # TUF repository logic
@@ -110,7 +110,7 @@ docker-compose -f podman-compose.yml up --build
 ```
 
 The containerized setup includes:
-- **tuf-init**: Repository initialization with real keys
+- **tuf-server**: Repository initialization and HTTP server with real keys
 - **tuf-client**: Production go-tuf v2 client
 
 ## 🔍 Available Commands
