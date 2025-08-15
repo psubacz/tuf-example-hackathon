@@ -29,7 +29,7 @@ The Update Framework (TUF) is a framework for securing software update systems. 
 ## Project Structure
 
 ```
-tuf-golang-project/
+tuf-example-hackathon/
 ├── cmd/                         # Main applications
 │   ├── tuf-server/             # Repository initialization & server
 │   └── tuf-client/             # go-tuf v2 client
@@ -37,11 +37,20 @@ tuf-golang-project/
 │   ├── tuf/                   # TUF repository logic
 │   │   ├── repository_v2.go   # go-tuf v2 implementation
 │   │   └── keys.go           # Cryptographic key management
-│   └── server/                # HTTP server implementation
-├── build/package/             # Docker containers
+│   ├── server/                # HTTP server implementation
+│   └── logger/                # Logging utilities
+├── build/                     # Build and deployment files
+│   ├── package/              # Container definitions
+│   └── ci/                   # CI/CD configurations
+├── charts/                    # Helm charts
+├── docs/                      # Comprehensive documentation
+│   ├── architecture/         # System architecture docs
+│   ├── api/                  # API reference documentation
+│   └── deployment.md         # Deployment guides
 ├── tuf-repository-v2/         # Generated TUF repository
 │   ├── metadata/             # TUF metadata files
 │   └── targets/             # Target files
+├── tuf-client-v2-cache/       # Client cache directory
 └── README.md                 # This guide
 ```
 
@@ -98,20 +107,29 @@ Example signed metadata structure:
 
 ## 🐳 Container Deployment
 
-Run the complete TUF system using Docker containers:
+Run the complete TUF system using Podman containers:
 
 ```bash
 # Build and run all services
 make run-containers
 
-# Or manually with Docker
+# Stop services
+make stop-containers
+
+# Or manually with Podman
 cd build/package
-docker-compose -f podman-compose.yml up --build
+podman-compose -f podman-compose.yml up --build
+podman-compose -f podman-compose.yml down
+
+# For production deployment
+podman-compose -f podman-compose.prod.yml up --build
 ```
 
 The containerized setup includes:
-- **tuf-server**: Repository initialization and HTTP server with real keys
-- **tuf-client**: Production go-tuf v2 client
+- **tuf-server**: TUF repository server with go-tuf v2, health checks, and metrics
+- **tuf-client**: Production go-tuf v2 client with automatic server dependency
+- **Persistent volumes**: For repository data, configuration, logs, and client cache
+- **Network isolation**: Dedicated bridge network for secure communication
 
 ## 🔍 Available Commands
 
@@ -121,6 +139,9 @@ The containerized setup includes:
 | `make init-repo` | Create TUF repository with go-tuf v2 |
 | `make run-client` | Run go-tuf v2 client |
 | `make test-ota` | Complete integration test |
+| `make build-containers` | Build container images |
+| `make run-containers` | Run containerized services |
+| `make stop-containers` | Stop containerized services |
 | `make clean` | Remove generated files |
 | `make help` | Show all commands |
 
@@ -190,6 +211,14 @@ For production deployment:
 5. **Access control**: Restrict repository modification access
 6. **Monitoring**: Log all repository operations
 7. **Backup**: Secure backup of signing keys
+
+## 📚 Documentation
+
+For comprehensive documentation, see the [docs/](docs/) directory:
+
+- **[Architecture Documentation](docs/architecture/)**: System design, components, and data flow
+- **[API Reference](docs/api/endpoints.md)**: Complete REST API documentation
+- **[Deployment Guide](docs/deployment.md)**: Production deployment instructions
 
 ## References
 
