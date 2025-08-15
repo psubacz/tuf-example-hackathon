@@ -1,5 +1,5 @@
 Hello TUF World with go-tuf v2!
 This is a sample file in the TUF repository using the official go-tuf v2 library.
-Created at: 2025-08-15T16:07:10-04:00
+Created at: 2025-08-15T16:15:27-04:00
 File purpose: Demonstrate TUF target verification with production-grade implementation
 Content integrity: This file is protected by go-tuf v2 cryptographic signatures

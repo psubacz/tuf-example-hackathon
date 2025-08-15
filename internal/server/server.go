@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"tuf-golang-project/internal/logger"
 )
 
 // Server represents the TUF repository server
@@ -17,7 +20,7 @@ type Server struct {
 	config   *Config
 	mux      *http.ServeMux
 	server   *http.Server
-	logger   *log.Logger
+	logger   *slog.Logger
 	metrics  *Metrics
 	shutdown chan struct{}
 }
@@ -27,7 +30,7 @@ func New(config *Config) *Server {
 	s := &Server{
 		config:   config,
 		mux:      http.NewServeMux(),
-		logger:   log.New(os.Stdout, "[TUF-SERVER] ", log.LstdFlags|log.Lshortfile),
+		logger:   logger.Logger,
 		metrics:  NewMetrics(),
 		shutdown: make(chan struct{}),
 	}
@@ -63,7 +66,7 @@ func (s *Server) setupServer() {
 		ReadTimeout:  time.Duration(s.config.ReadTimeout) * time.Second,
 		WriteTimeout: time.Duration(s.config.WriteTimeout) * time.Second,
 		IdleTimeout:  time.Duration(s.config.IdleTimeout) * time.Second,
-		ErrorLog:     s.logger,
+		ErrorLog:     log.New(os.Stderr, "[HTTP-ERROR] ", log.LstdFlags),
 	}
 }
 
@@ -74,14 +77,15 @@ func (s *Server) Start() error {
 		return fmt.Errorf("TUF repository not found at %s. Run 'go run cmd/tuf-demo' first", s.config.RepositoryPath)
 	}
 
-	s.logger.Printf("🚀 TUF Repository Server starting...")
-	s.logger.Printf("📁 Repository: %s", s.config.RepositoryPath)
-	s.logger.Printf("🌐 Server: http://localhost:%d", s.config.Port)
-	s.logger.Printf("📊 Log Level: %s", s.config.LogLevel)
-	s.logger.Printf("🔒 Security: Headers enabled, CORS: %t", s.config.CORS.Enabled)
+	s.logger.Info("TUF Repository Server starting")
+	s.logger.Info("Server configuration", 
+		"repository", s.config.RepositoryPath,
+		"server", fmt.Sprintf("http://localhost:%d", s.config.Port),
+		"log_level", s.config.LogLevel,
+		"cors_enabled", s.config.CORS.Enabled)
 	
 	if s.config.TLS.Enabled {
-		s.logger.Printf("🔐 TLS: Enabled (Cert: %s, Key: %s)", s.config.TLS.CertFile, s.config.TLS.KeyFile)
+		s.logger.Info("TLS enabled", "cert_file", s.config.TLS.CertFile, "key_file", s.config.TLS.KeyFile)
 		return s.server.ListenAndServeTLS(s.config.TLS.CertFile, s.config.TLS.KeyFile)
 	}
 	
@@ -90,18 +94,18 @@ func (s *Server) Start() error {
 
 // Stop gracefully stops the server
 func (s *Server) Stop(ctx context.Context) error {
-	s.logger.Println("🛑 Gracefully shutting down server...")
+	s.logger.Info("Gracefully shutting down server")
 	
 	// Signal shutdown to other goroutines
 	close(s.shutdown)
 	
 	// Shutdown HTTP server
 	if err := s.server.Shutdown(ctx); err != nil {
-		s.logger.Printf("❌ Server shutdown error: %v", err)
+		s.logger.Error("Server shutdown error", "error", err)
 		return err
 	}
 	
-	s.logger.Println("✅ Server stopped successfully")
+	s.logger.Info("Server stopped successfully")
 	return nil
 }
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/sigstore/sigstore/pkg/signature"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
+	"tuf-golang-project/internal/logger"
 )
 
 const (
@@ -79,7 +80,7 @@ func (r *RepositoryV2) createMetadataV2() error {
 	expirationTime := time.Now().Add(DefaultV2Expiration)
 	
 	// Generate proper cryptographic keys for production use
-	fmt.Println("🔑 Generating cryptographic keys for TUF roles...")
+	logger.Logger.Info("Generating cryptographic keys for TUF roles")
 	keyManager, err := NewKeyManager()
 	if err != nil {
 		return fmt.Errorf("failed to generate keys: %w", err)
@@ -97,7 +98,7 @@ func (r *RepositoryV2) createMetadataV2() error {
 		}
 	}
 
-	fmt.Printf("✅ Generated %d cryptographic keys for TUF roles\n", len(keyManager.GetKeyPairs()))
+	logger.Logger.Info("Generated cryptographic keys for TUF roles", "count", len(keyManager.GetKeyPairs()))
 
 	// Create targets metadata using factory function
 	targetsMetadata := metadata.Targets(expirationTime)
@@ -124,7 +125,7 @@ func (r *RepositoryV2) createMetadataV2() error {
 	}
 
 	// Sign all metadata with their respective keys
-	fmt.Println("🔐 Signing metadata with generated keys...")
+	logger.Logger.Info("Signing metadata with generated keys")
 	
 	// Sign targets metadata
 	targetsSigner, err := signature.LoadSigner(keyManager.GetTargetsKey().PrivateKey, crypto.Hash(0))
@@ -162,7 +163,7 @@ func (r *RepositoryV2) createMetadataV2() error {
 		return fmt.Errorf("failed to sign root metadata: %w", err)
 	}
 
-	fmt.Println("✅ All metadata signed successfully")
+	logger.Logger.Info("All metadata signed successfully")
 
 	// Save all signed metadata
 	if err := r.saveMetadataV2("root.json", rootMetadata); err != nil {
@@ -211,7 +212,10 @@ func (r *RepositoryV2) addFileToTargetsV2(targets *metadata.Metadata[metadata.Ta
 	}
 
 	targets.Signed.Targets[filename] = targetFile
-	fmt.Printf("✅ Added target file: %s (size: %d, sha256: %s)\n", filename, fileInfo.Size(), hex.EncodeToString(hashBytes))
+	logger.Logger.Info("Added target file", 
+		"filename", filename, 
+		"size", fileInfo.Size(), 
+		"sha256", hex.EncodeToString(hashBytes))
 	return nil
 }
 

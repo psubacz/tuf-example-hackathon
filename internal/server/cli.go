@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"tuf-golang-project/internal/logger"
 )
 
 // CLI represents the command line interface
@@ -141,21 +143,16 @@ func (cli *CLI) runWithGracefulShutdown() error {
 	
 	// Start server in goroutine
 	go func() {
-		fmt.Printf("🚀 Starting TUF Repository Server v2.0...\n")
-		fmt.Printf("📁 Repository: %s\n", cli.config.RepositoryPath)
-		fmt.Printf("🌐 Address: %s:%d\n", cli.config.Host, cli.config.Port)
+		logger.Logger.Info("Starting TUF Repository Server v2.0",
+			"repository", cli.config.RepositoryPath,
+			"address", fmt.Sprintf("%s:%d", cli.config.Host, cli.config.Port),
+			"tls_enabled", cli.config.TLS.Enabled,
+			"metrics_enabled", cli.config.Metrics.Enabled,
+			"cors_enabled", cli.config.CORS.Enabled,
+			"rate_limit", cli.config.RateLimit.Requests,
+			"compression_enabled", cli.config.Compression.Enabled)
 		
-		if cli.config.TLS.Enabled {
-			fmt.Printf("🔐 TLS: Enabled\n")
-		} else {
-			fmt.Printf("⚠️ TLS: Disabled (HTTP only)\n")
-		}
-		
-		fmt.Printf("📊 Metrics: %t\n", cli.config.Metrics.Enabled)
-		fmt.Printf("🌍 CORS: %t\n", cli.config.CORS.Enabled)
-		fmt.Printf("⚡ Rate Limit: %d req/hr\n", cli.config.RateLimit.Requests)
-		fmt.Printf("🔒 Compression: %t\n", cli.config.Compression.Enabled)
-		fmt.Printf("\n✅ Server ready! Press Ctrl+C to stop.\n\n")
+		logger.Logger.Info("Server ready! Press Ctrl+C to stop")
 		
 		if err := cli.server.Start(); err != nil {
 			errChan <- err
@@ -165,7 +162,7 @@ func (cli *CLI) runWithGracefulShutdown() error {
 	// Wait for shutdown signal or server error
 	select {
 	case sig := <-sigChan:
-		fmt.Printf("\n🛑 Received signal: %s\n", sig)
+		logger.Logger.Info("Received shutdown signal", "signal", sig.String())
 		return cli.gracefulShutdown(ctx)
 		
 	case err := <-errChan:
@@ -179,7 +176,7 @@ func (cli *CLI) runWithGracefulShutdown() error {
 
 // gracefulShutdown performs graceful server shutdown
 func (cli *CLI) gracefulShutdown(ctx context.Context) error {
-	fmt.Printf("⏳ Graceful shutdown initiated...\n")
+	logger.Logger.Info("Graceful shutdown initiated")
 	
 	// Create timeout context for shutdown
 	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -187,11 +184,11 @@ func (cli *CLI) gracefulShutdown(ctx context.Context) error {
 	
 	// Stop the server
 	if err := cli.server.Stop(shutdownCtx); err != nil {
-		fmt.Printf("❌ Shutdown error: %v\n", err)
+		logger.Logger.Error("Shutdown error", "error", err)
 		return err
 	}
 	
-	fmt.Printf("✅ Server stopped gracefully\n")
+	logger.Logger.Info("Server stopped gracefully")
 	return nil
 }
 

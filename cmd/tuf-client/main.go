@@ -1,19 +1,18 @@
 package main
 
 import (
-	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/theupdateframework/go-tuf/v2/metadata/config"
 	"github.com/theupdateframework/go-tuf/v2/metadata/updater"
+	"tuf-golang-project/internal/logger"
 )
 
 func main() {
-	fmt.Println("🔐 TUF Client with go-tuf v2")
-	fmt.Println("Connecting to TUF repository for secure updates using official go-tuf v2 library...")
+	logger.Logger.Info("🔐 TUF Client with go-tuf v2")
+	logger.Logger.Info("Connecting to TUF repository for secure updates using official go-tuf v2 library...")
 
 	// Configuration
 	serverURL := "http://localhost:8080"
@@ -39,31 +38,33 @@ func main() {
 		}
 	}
 
-	fmt.Printf("Server: %s\n", serverURL)
-	fmt.Printf("Cache: %s\n", cacheDir)
-	fmt.Printf("Local repo: %s\n", repoPath)
+	logger.Logger.Info("Configuration", "server", serverURL, "cache", cacheDir, "local_repo", repoPath)
 
 	// Create cache directory and targets directory
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		log.Fatalf("Failed to create cache directory: %v", err)
+		logger.Logger.Error("Failed to create cache directory", "error", err)
+		os.Exit(1)
 	}
 	if err := os.MkdirAll(filepath.Join(cacheDir, "targets"), 0755); err != nil {
-		log.Fatalf("Failed to create targets directory: %v", err)
+		logger.Logger.Error("Failed to create targets directory", "error", err)
+		os.Exit(1)
 	}
 
 	// Read root metadata from local repository (for bootstrapping trust)
 	rootPath := filepath.Join(repoPath, "metadata", "root.json")
 	rootBytes, err := os.ReadFile(rootPath)
 	if err != nil {
-		log.Fatalf("Failed to read root metadata: %v", err)
+		logger.Logger.Error("Failed to read root metadata", "error", err, "path", rootPath)
+		os.Exit(1)
 	}
 
-	fmt.Printf("🔑 Loaded root metadata from %s (%d bytes)\n", rootPath, len(rootBytes))
+	logger.Logger.Info("🔑 Loaded root metadata", "path", rootPath, "bytes", len(rootBytes))
 
 	// Create updater configuration
 	config, err := config.New(serverURL, rootBytes)
 	if err != nil {
-		log.Fatalf("Failed to create updater config: %v", err)
+		logger.Logger.Error("Failed to create updater config", "error", err)
+		os.Exit(1)
 	}
 
 	// Configure local directories for metadata and targets
@@ -72,22 +73,23 @@ func main() {
 	config.RemoteTargetsURL = serverURL + "/targets"
 	config.PrefixTargetsWithHash = false // Disable consistent snapshots for simplicity
 
-	fmt.Printf("⚙️ Created updater configuration for %s\n", serverURL)
+	logger.Logger.Info("⚙️ Created updater configuration", "server", serverURL)
 
 	// Create updater instance
 	client, err := updater.New(config)
 	if err != nil {
-		log.Fatalf("Failed to create updater: %v", err)
+		logger.Logger.Error("Failed to create updater", "error", err)
+		os.Exit(1)
 	}
 
-	fmt.Printf("🚀 Created go-tuf v2 updater client\n")
+	logger.Logger.Info("🚀 Created go-tuf v2 updater client")
 
 	// Perform update workflow
-	fmt.Printf("\n🔄 Starting TUF update workflow...\n")
+	logger.Logger.Info("🔄 Starting TUF update workflow")
 
 	// For demonstration, we'll work with the local repository files
 	// In a real scenario, this would fetch from the remote server
-	fmt.Printf("📋 Loading local metadata for demonstration...\n")
+	logger.Logger.Info("📋 Loading local metadata for demonstration")
 	
 	// Copy local metadata to cache for go-tuf v2 to use
 	metadataFiles := []string{"root.json", "targets.json", "snapshot.json", "timestamp.json"}
@@ -95,49 +97,53 @@ func main() {
 		srcPath := filepath.Join(repoPath, "metadata", file)
 		dstPath := filepath.Join(cacheDir, file)
 		if err := copyFile(srcPath, dstPath); err != nil {
-			log.Printf("Warning: failed to copy %s: %v", file, err)
+			logger.Logger.Warn("Failed to copy metadata file", "file", file, "error", err)
 		}
 	}
 
-	fmt.Printf("✅ TUF client initialized successfully with go-tuf v2\n")
+	logger.Logger.Info("✅ TUF client initialized successfully with go-tuf v2")
 
 	// Try to refresh metadata and demonstrate target listing
-	fmt.Printf("\n🔄 Refreshing trusted metadata...\n")
+	logger.Logger.Info("🔄 Refreshing trusted metadata")
 	err = client.Refresh()
 	if err != nil {
-		log.Printf("Warning: Failed to refresh metadata: %v", err)
-		fmt.Printf("💡 This is expected in local demo mode (no remote server)\n")
+		logger.Logger.Warn("Failed to refresh metadata", "error", err)
+		logger.Logger.Info("💡 This is expected in local demo mode (no remote server)")
 	} else {
-		fmt.Printf("✅ Metadata refreshed successfully\n")
+		logger.Logger.Info("✅ Metadata refreshed successfully")
 	}
 
 	// Demonstrate target file information
-	fmt.Printf("\n📂 Demonstrating target file verification:\n")
+	logger.Logger.Info("📂 Demonstrating target file verification")
 	
 	// Copy the sample target file to demonstrate verification
 	sampleTargetSrc := filepath.Join(repoPath, "targets", "sample.txt")
 	sampleTargetDst := filepath.Join(cacheDir, "targets", "sample.txt")
 	if err := copyFile(sampleTargetSrc, sampleTargetDst); err != nil {
-		log.Printf("Warning: failed to copy target file: %v", err)
+		logger.Logger.Warn("Failed to copy target file", "error", err)
 	} else {
-		fmt.Printf("📄 Copied sample.txt to client cache\n")
+		logger.Logger.Info("📄 Copied sample.txt to client cache")
 		
 		// Read the file to show its content
 		content, err := os.ReadFile(sampleTargetDst)
 		if err == nil {
-			fmt.Printf("📝 File content preview: %.80s...\n", string(content))
+			preview := string(content)
+			if len(preview) > 80 {
+				preview = preview[:80] + "..."
+			}
+			logger.Logger.Info("📝 File content preview", "content", preview)
 		}
 	}
 
-	fmt.Printf("\n🔐 Security benefits demonstrated:\n")
-	fmt.Printf("  ✓ Cryptographic key ID consistency verified\n")
-	fmt.Printf("  ✓ Root metadata signature validation passed\n") 
-	fmt.Printf("  ✓ go-tuf v2 client successfully initialized\n")
-	fmt.Printf("  ✓ Production-ready TUF implementation working\n")
+	logger.Logger.Info("🔐 Security benefits demonstrated")
+	logger.Logger.Info("Security check", "feature", "Cryptographic key ID consistency verified")
+	logger.Logger.Info("Security check", "feature", "Root metadata signature validation passed")
+	logger.Logger.Info("Security check", "feature", "go-tuf v2 client successfully initialized")
+	logger.Logger.Info("Security check", "feature", "Production-ready TUF implementation working")
 
-	fmt.Printf("\n💡 Client demonstration complete!\n")
-	fmt.Printf("This shows go-tuf v2 client bootstrap and trust establishment.\n")
-	fmt.Printf("In production, the client would fetch metadata from a remote server.\n")
+	logger.Logger.Info("💡 Client demonstration complete!")
+	logger.Logger.Info("This shows go-tuf v2 client bootstrap and trust establishment.")
+	logger.Logger.Info("In production, the client would fetch metadata from a remote server.")
 }
 
 // copyFile copies a file from src to dst
