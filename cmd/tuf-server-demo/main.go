@@ -63,7 +63,7 @@ func NewTUFServer(repoPath string, port int) *TUFServer {
 func (s *TUFServer) Start() error {
 	// Check if repository exists
 	if _, err := os.Stat(s.repoPath); os.IsNotExist(err) {
-		return fmt.Errorf("TUF repository not found at %s. Run 'go run main.go' first", s.repoPath)
+		return fmt.Errorf("TUF repository not found at %s. Run 'go run cmd/tuf-demo' first", s.repoPath)
 	}
 
 	// Create HTTP server
@@ -398,7 +398,7 @@ func main() {
 		case "--help", "-h":
 			fmt.Printf(`TUF Repository Server
 
-Usage: go run server.go [options]
+Usage: go run cmd/tuf-server-demo [options]
 
 Options:
   --repo, -r    Repository path (default: ./tuf-repository)
@@ -406,9 +406,9 @@ Options:
   --help, -h    Show this help message
 
 Examples:
-  go run server.go
-  go run server.go --port 9000
-  go run server.go --repo /path/to/repo --port 8080
+  go run cmd/tuf-server-demo
+  go run cmd/tuf-server-demo --port 9000
+  go run cmd/tuf-server-demo --repo /path/to/repo --port 8080
 
 The server will serve TUF metadata and target files over HTTP for
 over-the-air updates. Clients can securely download and verify files

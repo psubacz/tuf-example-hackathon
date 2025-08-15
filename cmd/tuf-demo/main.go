@@ -6,61 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"tuf-golang-project/pkg/tuf"
 )
-
-// Simple TUF demonstration without the complex metadata API
-// This creates basic TUF-like structure that demonstrates the concepts
-
-type TUFKey struct {
-	KeyType string `json:"keytype"`
-	Scheme  string `json:"scheme"`
-	KeyVal  struct {
-		Public string `json:"public"`
-	} `json:"keyval"`
-}
-
-type TUFRole struct {
-	KeyIDs    []string `json:"keyids"`
-	Threshold int      `json:"threshold"`
-}
-
-type TUFRoot struct {
-	Type    string              `json:"_type"`
-	Version int                 `json:"version"`
-	Expires string              `json:"expires"`
-	Keys    map[string]TUFKey   `json:"keys"`
-	Roles   map[string]TUFRole  `json:"roles"`
-}
-
-type TUFTargetInfo struct {
-	Length int               `json:"length"`
-	Hashes map[string]string `json:"hashes"`
-}
-
-type TUFTargets struct {
-	Type    string                    `json:"_type"`
-	Version int                       `json:"version"`
-	Expires string                    `json:"expires"`
-	Targets map[string]TUFTargetInfo  `json:"targets"`
-}
-
-type TUFSnapshot struct {
-	Type    string `json:"_type"`
-	Version int    `json:"version"`
-	Expires string `json:"expires"`
-	Meta    map[string]struct {
-		Version int `json:"version"`
-	} `json:"meta"`
-}
-
-type TUFTimestamp struct {
-	Type    string `json:"_type"`
-	Version int    `json:"version"`
-	Expires string `json:"expires"`
-	Meta    map[string]struct {
-		Version int `json:"version"`
-	} `json:"meta"`
-}
 
 func main() {
 	fmt.Println("🔐 Simple TUF Repository Demo")
@@ -100,11 +48,11 @@ func main() {
 	expires := time.Now().AddDate(1, 0, 0).Format(time.RFC3339)
 	
 	// Root metadata
-	root := TUFRoot{
+	root := tuf.Root{
 		Type:    "root",
 		Version: 1,
 		Expires: expires,
-		Keys: map[string]TUFKey{
+		Keys: map[string]tuf.Key{
 			"key1": {
 				KeyType: "ed25519",
 				Scheme:  "ed25519",
@@ -113,7 +61,7 @@ func main() {
 				}{Public: "demo_public_key_data"},
 			},
 		},
-		Roles: map[string]TUFRole{
+		Roles: map[string]tuf.Role{
 			"root": {
 				KeyIDs:    []string{"key1"},
 				Threshold: 1,
@@ -134,11 +82,11 @@ func main() {
 	}
 	
 	// Targets metadata
-	targets := TUFTargets{
+	targets := tuf.Targets{
 		Type:    "targets",
 		Version: 1,
 		Expires: expires,
-		Targets: map[string]TUFTargetInfo{
+		Targets: map[string]tuf.TargetInfo{
 			"sample.txt": {
 				Length: fileSize,
 				Hashes: map[string]string{
@@ -149,7 +97,7 @@ func main() {
 	}
 	
 	// Snapshot metadata
-	snapshot := TUFSnapshot{
+	snapshot := tuf.Snapshot{
 		Type:    "snapshot",
 		Version: 1,
 		Expires: expires,
@@ -161,7 +109,7 @@ func main() {
 	}
 	
 	// Timestamp metadata
-	timestamp := TUFTimestamp{
+	timestamp := tuf.Timestamp{
 		Type:    "timestamp",
 		Version: 1,
 		Expires: expires,
@@ -203,5 +151,5 @@ func main() {
 	fmt.Printf("  - Snapshot metadata provides consistency\n")
 	fmt.Printf("  - Timestamp metadata provides freshness\n")
 	fmt.Printf("\n🔍 Explore the files to see TUF metadata structure!\n")
-	fmt.Printf("Next: Run 'go run client.go' to see a simple verification example\n")
+	fmt.Printf("Next: Run 'go run cmd/tuf-client-demo' to see a simple verification example\n")
 }

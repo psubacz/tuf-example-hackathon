@@ -7,23 +7,23 @@ setup:
 
 # Initialize the TUF repository
 init-repo:
-	go run main.go
+	go run ./cmd/tuf-demo
 
 # Run the local TUF client example
 run-client:
-	go run client.go
+	go run ./cmd/tuf-client-demo
 
 # Start the TUF repository server
 run-server:
-	go run server.go
+	go run ./cmd/tuf-server-demo
 
 # Run the network TUF client
 run-network-client:
-	go run network-client.go
+	go run ./cmd/network-client-demo
 
 # Add more targets to repository
 add-targets:
-	go run add_targets.go
+	go run ./cmd/add-targets-demo
 
 # Clean generated files
 clean:
@@ -35,17 +35,17 @@ clean:
 test-ota:
 	@echo "🚀 Testing Over-the-Air Updates..."
 	@echo "1. Creating repository..."
-	@go run main.go
+	@go run ./cmd/tuf-demo
 	@echo "2. Adding more targets..."
-	@go run add_targets.go
+	@go run ./cmd/add-targets-demo
 	@echo "3. Starting server in background..."
-	@go run server.go --port 8080 &
+	@go run ./cmd/tuf-server-demo --port 8080 &
 	@echo "4. Waiting for server to start..."
 	@sleep 3
 	@echo "5. Running network client..."
-	@go run network-client.go
+	@go run ./cmd/network-client-demo
 	@echo "6. Stopping server..."
-	@pkill -f "go run server.go" || true
+	@pkill -f "go run ./cmd/tuf-server-demo" || true
 	@echo "✅ Over-the-air update test completed!"
 
 # Show available commands
@@ -62,7 +62,7 @@ help:
 	@echo "  help            - Show this help message"
 	@echo ""
 	@echo "📖 For complete guide including deployment, see README.md"
-	@echo "🌐 For network access: go run server.go then go run network-client.go"
+	@echo "🌐 For network access: go run ./cmd/tuf-server-demo then go run ./cmd/network-client-demo"
 
 # Default target
 all: setup init-repo add-targets

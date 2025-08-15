@@ -6,20 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"tuf-golang-project/pkg/tuf"
 )
-
-// Same structures as our main program
-type TUFTargetInfo struct {
-	Length int               `json:"length"`
-	Hashes map[string]string `json:"hashes"`
-}
-
-type TUFTargets struct {
-	Type    string                    `json:"_type"`
-	Version int                       `json:"version"`
-	Expires string                    `json:"expires"`
-	Targets map[string]TUFTargetInfo  `json:"targets"`
-}
 
 func main() {
 	fmt.Println("📦 Adding More Targets to TUF Repository")
@@ -27,7 +16,7 @@ func main() {
 	repoDir := "./tuf-repository"
 	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
 		fmt.Println("❌ TUF repository not found!")
-		fmt.Println("Please run 'go run main.go' first to create the repository.")
+		fmt.Println("Please run 'go run cmd/tuf-demo' first to create the repository.")
 		os.Exit(1)
 	}
 	
@@ -98,7 +87,7 @@ For more information about TUF, visit: https://theupdateframework.io/
 		panic(fmt.Sprintf("Failed to read targets.json: %v", err))
 	}
 	
-	var targets TUFTargets
+	var targets tuf.Targets
 	if err := json.Unmarshal(targetsData, &targets); err != nil {
 		panic(fmt.Sprintf("Failed to parse targets.json: %v", err))
 	}
@@ -114,7 +103,7 @@ For more information about TUF, visit: https://theupdateframework.io/
 		}
 		
 		// In production, you'd calculate actual cryptographic hashes
-		targets.Targets[filename] = TUFTargetInfo{
+		targets.Targets[filename] = tuf.TargetInfo{
 			Length: int(fileInfo.Size()),
 			Hashes: map[string]string{
 				"sha256": fmt.Sprintf("demo_hash_value_for_%s", filename),
@@ -146,5 +135,5 @@ For more information about TUF, visit: https://theupdateframework.io/
 		fmt.Printf("  - %s (%d bytes)\n", filename, info.Length)
 	}
 	
-	fmt.Println("\n🔍 Run 'go run client.go' to verify all targets!")
+	fmt.Println("\n🔍 Run 'go run cmd/tuf-client-demo' to verify all targets!")
 }

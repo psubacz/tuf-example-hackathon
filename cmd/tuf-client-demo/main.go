@@ -5,41 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"tuf-golang-project/pkg/tuf"
 )
-
-// Simple structures to match our TUF metadata
-type TUFRoot struct {
-	Type    string              `json:"_type"`
-	Version int                 `json:"version"`
-	Expires string              `json:"expires"`
-	Keys    map[string]TUFKey   `json:"keys"`
-	Roles   map[string]TUFRole  `json:"roles"`
-}
-
-type TUFKey struct {
-	KeyType string `json:"keytype"`
-	Scheme  string `json:"scheme"`
-	KeyVal  struct {
-		Public string `json:"public"`
-	} `json:"keyval"`
-}
-
-type TUFRole struct {
-	KeyIDs    []string `json:"keyids"`
-	Threshold int      `json:"threshold"`
-}
-
-type TUFTargetInfo struct {
-	Length int               `json:"length"`
-	Hashes map[string]string `json:"hashes"`
-}
-
-type TUFTargets struct {
-	Type    string                    `json:"_type"`
-	Version int                       `json:"version"`
-	Expires string                    `json:"expires"`
-	Targets map[string]TUFTargetInfo  `json:"targets"`
-}
 
 func main() {
 	fmt.Println("🔍 Simple TUF Client Demo")
@@ -50,7 +18,7 @@ func main() {
 	// Check if repository exists
 	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
 		fmt.Println("❌ TUF repository not found!")
-		fmt.Println("Please run 'go run main.go' first to create the repository.")
+		fmt.Println("Please run 'go run cmd/tuf-demo' first to create the repository.")
 		os.Exit(1)
 	}
 	
@@ -62,7 +30,7 @@ func main() {
 		panic(fmt.Sprintf("Failed to read root.json: %v", err))
 	}
 	
-	var root TUFRoot
+	var root tuf.Root
 	if err := json.Unmarshal(rootData, &root); err != nil {
 		panic(fmt.Sprintf("Failed to parse root.json: %v", err))
 	}
@@ -78,7 +46,7 @@ func main() {
 		panic(fmt.Sprintf("Failed to read targets.json: %v", err))
 	}
 	
-	var targets TUFTargets
+	var targets tuf.Targets
 	if err := json.Unmarshal(targetsData, &targets); err != nil {
 		panic(fmt.Sprintf("Failed to parse targets.json: %v", err))
 	}

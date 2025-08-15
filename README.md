@@ -25,15 +25,23 @@ The Update Framework (TUF) is a framework for securing software update systems. 
 ```
 tuf-golang-project/
 ├── go.mod              # Go module definition (no external dependencies!)
-├── main.go             # Repository setup and metadata creation
-├── client.go           # Local TUF client example
-├── server.go           # 🌐 HTTP server for network access
-├── network-client.go   # 🌐 Network client for over-the-air updates
-├── add_targets.go      # Script to add additional targets
+├── cmd/                # Main applications (following Go project layout)
+│   ├── tuf-demo/       # Repository setup and metadata creation
+│   ├── tuf-client-demo/    # Local TUF client example
+│   ├── tuf-server-demo/    # 🌐 HTTP server for network access
+│   ├── network-client-demo/ # 🌐 Network client for over-the-air updates
+│   └── add-targets-demo/   # Script to add additional targets
+├── pkg/                # Public library code
+│   └── tuf/            # TUF types and structures
+├── internal/           # Private application code
+│   ├── client/         # Client implementation
+│   ├── server/         # Server implementation
+│   └── tuf/            # TUF repository logic
+├── api/                # API definitions
 ├── README.md           # This comprehensive guide
 ├── Makefile            # Build and run commands
 ├── .gitignore          # Git ignore rules
-├── tuf-repository/     # TUF repository (created when running main.go)
+├── tuf-repository/     # TUF repository (created when running tuf-demo)
 │   ├── metadata/       # TUF metadata files (served over HTTP)
 │   └── targets/        # Target files (served over HTTP)
 ├── client-cache/       # Local client cache directory

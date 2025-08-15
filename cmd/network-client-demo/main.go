@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"tuf-golang-project/pkg/tuf"
 )
 
 // Network TUF Client for over-the-air updates
@@ -15,40 +17,6 @@ type NetworkTUFClient struct {
 	serverURL   string
 	clientDir   string
 	httpClient  *http.Client
-}
-
-// TUF metadata structures (same as before)
-type TUFRoot struct {
-	Type    string              `json:"_type"`
-	Version int                 `json:"version"`
-	Expires string              `json:"expires"`
-	Keys    map[string]TUFKey   `json:"keys"`
-	Roles   map[string]TUFRole  `json:"roles"`
-}
-
-type TUFKey struct {
-	KeyType string `json:"keytype"`
-	Scheme  string `json:"scheme"`
-	KeyVal  struct {
-		Public string `json:"public"`
-	} `json:"keyval"`
-}
-
-type TUFRole struct {
-	KeyIDs    []string `json:"keyids"`
-	Threshold int      `json:"threshold"`
-}
-
-type TUFTargetInfo struct {
-	Length int               `json:"length"`
-	Hashes map[string]string `json:"hashes"`
-}
-
-type TUFTargets struct {
-	Type    string                    `json:"_type"`
-	Version int                       `json:"version"`
-	Expires string                    `json:"expires"`
-	Targets map[string]TUFTargetInfo  `json:"targets"`
 }
 
 func NewNetworkTUFClient(serverURL, clientDir string) *NetworkTUFClient {
@@ -150,7 +118,7 @@ func (c *NetworkTUFClient) Update() error {
 		return fmt.Errorf("failed to get root metadata: %v", err)
 	}
 	
-	var root TUFRoot
+	var root tuf.Root
 	if err := json.Unmarshal(rootData, &root); err != nil {
 		return fmt.Errorf("failed to parse root metadata: %v", err)
 	}
@@ -186,7 +154,7 @@ func (c *NetworkTUFClient) Update() error {
 		return fmt.Errorf("failed to get targets metadata: %v", err)
 	}
 	
-	var targets TUFTargets
+	var targets tuf.Targets
 	if err := json.Unmarshal(targetsData, &targets); err != nil {
 		return fmt.Errorf("failed to parse targets metadata: %v", err)
 	}
@@ -299,7 +267,7 @@ func main() {
 		case "--help", "-h":
 			fmt.Printf(`Network TUF Client for Over-the-Air Updates
 
-Usage: go run network-client.go [options]
+Usage: go run cmd/network-client-demo [options]
 
 Options:
   --server, -s  TUF server URL (default: http://localhost:8080)
@@ -307,9 +275,9 @@ Options:
   --help, -h    Show this help message
 
 Examples:
-  go run network-client.go
-  go run network-client.go --server http://your-server.com:8080
-  go run network-client.go --server http://10.0.1.100:8080 --cache ./my-cache
+  go run cmd/network-client-demo
+  go run cmd/network-client-demo --server http://your-server.com:8080
+  go run cmd/network-client-demo --server http://10.0.1.100:8080 --cache ./my-cache
 
 This client demonstrates secure over-the-air updates using TUF:
 1. Downloads TUF metadata from the server
@@ -332,7 +300,7 @@ This client demonstrates secure over-the-air updates using TUF:
 	if err := client.Update(); err != nil {
 		fmt.Printf("\n❌ Update failed: %v\n", err)
 		fmt.Println("\n💡 Make sure the TUF server is running:")
-		fmt.Println("   go run server.go")
+		fmt.Println("   go run cmd/tuf-server-demo")
 		os.Exit(1)
 	}
 	
