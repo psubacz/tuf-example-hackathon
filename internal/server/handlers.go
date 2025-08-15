@@ -18,27 +18,27 @@ func (s *Server) metadataHandler(w http.ResponseWriter, r *http.Request) {
 		s.listMetadataFiles(w, r)
 		return
 	}
-	
+
 	// Security: only allow .json files and prevent path traversal
 	if !strings.HasSuffix(path, ".json") || strings.Contains(path, "..") {
-		s.logger.Printf("⚠️ Invalid metadata file requested: %s from %s", path, getClientIP(r))
+		s.logger.Warn("Invalid metadata file requested: %s from %s", path, getClientIP(r))
 		http.Error(w, "Invalid metadata file", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Serve metadata file
 	filePath := filepath.Join(s.config.RepositoryPath, "metadata", path)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		s.logger.Printf("⚠️ Metadata file not found: %s", path)
+		s.logger.Warn("Metadata file not found: %s", path)
 		http.Error(w, "Metadata file not found", http.StatusNotFound)
 		return
 	}
-	
+
 	// Set appropriate headers for TUF metadata
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.config.Cache.TTL.Seconds())))
-	
-	s.logger.Printf("✅ Serving metadata: %s to %s", path, getClientIP(r))
+
+	s.logger.Warn("Serving metadata: %s to %s", path, getClientIP(r))
 	http.ServeFile(w, r, filePath)
 }
 
@@ -50,27 +50,27 @@ func (s *Server) targetsHandler(w http.ResponseWriter, r *http.Request) {
 		s.listTargetFiles(w, r)
 		return
 	}
-	
+
 	// Security: prevent path traversal
 	if strings.Contains(path, "..") {
-		s.logger.Printf("⚠️ Invalid target path requested: %s from %s", path, getClientIP(r))
+		s.logger.Warn("Invalid target path requested: %s from %s", path, getClientIP(r))
 		http.Error(w, "Invalid target path", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Serve target file
 	filePath := filepath.Join(s.config.RepositoryPath, "targets", path)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		s.logger.Printf("⚠️ Target file not found: %s", path)
+		s.logger.Warn("Target file not found: %s", path)
 		http.Error(w, "Target file not found", http.StatusNotFound)
 		return
 	}
-	
+
 	// Set appropriate content type and headers
 	s.setContentType(w, filepath.Ext(path))
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.config.Cache.TTL.Seconds())))
-	
-	s.logger.Printf("✅ Serving target: %s to %s", path, getClientIP(r))
+
+	s.logger.Warn("Serving target: %s to %s", path, getClientIP(r))
 	http.ServeFile(w, r, filePath)
 }
 
@@ -115,16 +115,16 @@ func (s *Server) listMetadataFiles(w http.ResponseWriter, r *http.Request) {
 	metadataDir := filepath.Join(s.config.RepositoryPath, "metadata")
 	files, err := os.ReadDir(metadataDir)
 	if err != nil {
-		s.logger.Printf("❌ Could not read metadata directory: %v", err)
+		s.logger.Warn("Could not read metadata directory: %v", err)
 		http.Error(w, "Could not read metadata directory", http.StatusInternalServerError)
 		return
 	}
-	
+
 	var metadataFiles []map[string]interface{}
 	for _, file := range files {
 		if !file.IsDir() && strings.HasSuffix(file.Name(), ".json") {
 			info, _ := file.Info()
-			
+
 			// Calculate file checksum for integrity
 			checksum := ""
 			if filePath := filepath.Join(metadataDir, file.Name()); filePath != "" {
@@ -132,7 +132,7 @@ func (s *Server) listMetadataFiles(w http.ResponseWriter, r *http.Request) {
 					checksum = hash
 				}
 			}
-			
+
 			metadataFiles = append(metadataFiles, map[string]interface{}{
 				"name":         file.Name(),
 				"size":         info.Size(),
@@ -142,13 +142,13 @@ func (s *Server) listMetadataFiles(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	
+
 	response := map[string]interface{}{
 		"metadata_files": metadataFiles,
 		"count":          len(metadataFiles),
 		"timestamp":      time.Now().Format(time.RFC3339),
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.config.Cache.TTL.Seconds())))
 	json.NewEncoder(w).Encode(response)
@@ -159,16 +159,16 @@ func (s *Server) listTargetFiles(w http.ResponseWriter, r *http.Request) {
 	targetsDir := filepath.Join(s.config.RepositoryPath, "targets")
 	files, err := os.ReadDir(targetsDir)
 	if err != nil {
-		s.logger.Printf("❌ Could not read targets directory: %v", err)
+		s.logger.Warn("Could not read targets directory: %v", err)
 		http.Error(w, "Could not read targets directory", http.StatusInternalServerError)
 		return
 	}
-	
+
 	var targetFiles []map[string]interface{}
 	for _, file := range files {
 		if !file.IsDir() {
 			info, _ := file.Info()
-			
+
 			// Calculate file checksum for integrity
 			checksum := ""
 			if filePath := filepath.Join(targetsDir, file.Name()); filePath != "" {
@@ -176,7 +176,7 @@ func (s *Server) listTargetFiles(w http.ResponseWriter, r *http.Request) {
 					checksum = hash
 				}
 			}
-			
+
 			targetFiles = append(targetFiles, map[string]interface{}{
 				"name":         file.Name(),
 				"size":         info.Size(),
@@ -187,13 +187,13 @@ func (s *Server) listTargetFiles(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	
+
 	response := map[string]interface{}{
 		"target_files": targetFiles,
 		"count":        len(targetFiles),
 		"timestamp":    time.Now().Format(time.RFC3339),
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.config.Cache.TTL.Seconds())))
 	json.NewEncoder(w).Encode(response)
@@ -241,21 +241,21 @@ func (s *Server) rootHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	
+
 	// Get repository statistics for the dashboard
 	info := s.getRepositoryInfo()
 	repoInfo, ok := info["repository"].(map[string]interface{})
 	if !ok {
 		repoInfo = make(map[string]interface{})
 	}
-	
+
 	serverInfo, ok := info["server"].(map[string]interface{})
 	if !ok {
 		serverInfo = make(map[string]interface{})
 	}
-	
+
 	html := s.generateDashboardHTML(repoInfo, serverInfo)
-	
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Write([]byte(html))
@@ -267,7 +267,7 @@ func (s *Server) generateDashboardHTML(repoInfo, serverInfo map[string]interface
 	if s.config.TLS.Enabled {
 		tlsStatus = "✅ HTTPS Enabled"
 	}
-	
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>

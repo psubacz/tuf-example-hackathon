@@ -34,18 +34,18 @@ func (rw *responseWriter) Write(data []byte) (int, error) {
 func (s *Server) loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
+
 		// Wrap response writer to capture status code and size
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-		
+
 		// Process request
 		next(rw, r)
-		
+
 		// Log request
 		duration := time.Since(start)
-		s.logger.Printf("%s %s %s %d %d bytes %v", 
+		s.logger.Info("%s %s %s %d %d bytes %v",
 			r.Method, r.URL.Path, r.RemoteAddr, rw.statusCode, rw.size, duration)
-		
+
 		// Record metrics
 		s.metrics.RecordRequest(r.Method, r.URL.Path, rw.statusCode, duration)
 	}
@@ -56,7 +56,7 @@ func (s *Server) metricsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.metrics.IncrementActiveConnections()
 		defer s.metrics.DecrementActiveConnections()
-		
+
 		next(w, r)
 	}
 }
@@ -69,15 +69,15 @@ func (s *Server) securityMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		
+
 		// Content Security Policy
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'")
-		
+
 		// HTTPS headers (only if TLS is enabled)
 		if s.config.TLS.Enabled {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
-		
+
 		next(w, r)
 	}
 }
@@ -89,9 +89,9 @@ func (s *Server) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		
+
 		origin := r.Header.Get("Origin")
-		
+
 		// Check if origin is allowed
 		allowed := false
 		for _, allowedOrigin := range s.config.CORS.AllowedOrigins {
@@ -100,30 +100,30 @@ func (s *Server) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				break
 			}
 		}
-		
+
 		if allowed {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
-		
+
 		// Set other CORS headers
 		w.Header().Set("Access-Control-Allow-Methods", strings.Join(s.config.CORS.AllowedMethods, ", "))
 		w.Header().Set("Access-Control-Allow-Headers", strings.Join(s.config.CORS.AllowedHeaders, ", "))
 		w.Header().Set("Access-Control-Max-Age", strconv.Itoa(s.config.CORS.MaxAge))
-		
+
 		if len(s.config.CORS.ExposedHeaders) > 0 {
 			w.Header().Set("Access-Control-Expose-Headers", strings.Join(s.config.CORS.ExposedHeaders, ", "))
 		}
-		
+
 		if s.config.CORS.AllowCredentials {
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
-		
+
 		// Handle preflight requests
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		next(w, r)
 	}
 }
@@ -135,13 +135,13 @@ func (s *Server) compressionMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		
+
 		// Check if client accepts gzip
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			next(w, r)
 			return
 		}
-		
+
 		// Wrap writer with gzip compression
 		gz, err := gzip.NewWriterLevel(w, s.config.Compression.Level)
 		if err != nil {
@@ -149,10 +149,10 @@ func (s *Server) compressionMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		defer gz.Close()
-		
+
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Set("Vary", "Accept-Encoding")
-		
+
 		gzw := &gzipResponseWriter{Writer: gz, ResponseWriter: w}
 		next(gzw, r)
 	}
@@ -185,17 +185,17 @@ func newRateLimiter(config RateLimitConfig) *RateLimiter {
 		clients: make(map[string]*clientLimiter),
 		config:  config,
 	}
-	
+
 	// Start cleanup goroutine
 	go rl.cleanup()
-	
+
 	return rl
 }
 
 func (rl *RateLimiter) cleanup() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		rl.mu.Lock()
 		for ip, client := range rl.clients {
@@ -214,20 +214,20 @@ func (rl *RateLimiter) allow(ip string) bool {
 			return true
 		}
 	}
-	
+
 	// Check blacklist
 	for _, blacklisted := range rl.config.IPBlacklist {
 		if ip == blacklisted {
 			return false
 		}
 	}
-	
+
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	
+
 	client, exists := rl.clients[ip]
 	now := time.Now()
-	
+
 	if !exists {
 		rl.clients[ip] = &clientLimiter{
 			tokens:   rl.config.BurstSize - 1,
@@ -235,22 +235,22 @@ func (rl *RateLimiter) allow(ip string) bool {
 		}
 		return true
 	}
-	
+
 	// Refill tokens based on elapsed time
 	elapsed := now.Sub(client.lastSeen)
 	tokensToAdd := int(elapsed / rl.config.Window * time.Duration(rl.config.Requests))
-	
+
 	client.tokens += tokensToAdd
 	if client.tokens > rl.config.BurstSize {
 		client.tokens = rl.config.BurstSize
 	}
 	client.lastSeen = now
-	
+
 	if client.tokens > 0 {
 		client.tokens--
 		return true
 	}
-	
+
 	return false
 }
 
@@ -259,22 +259,22 @@ func (s *Server) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	if !s.config.RateLimit.Enabled {
 		return next
 	}
-	
+
 	limiter := newRateLimiter(s.config.RateLimit)
-	
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Get client IP
 		ip := getClientIP(r)
-		
+
 		if !limiter.allow(ip) {
 			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(s.config.RateLimit.Requests))
 			w.Header().Set("X-RateLimit-Window", s.config.RateLimit.Window.String())
 			w.Header().Set("Retry-After", strconv.Itoa(int(s.config.RateLimit.Window.Seconds())))
-			
+
 			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
-		
+
 		next(w, r)
 	}
 }
@@ -288,18 +288,18 @@ func getClientIP(r *http.Request) string {
 			return strings.TrimSpace(ips[0])
 		}
 	}
-	
+
 	// Check X-Real-IP header (nginx)
 	if xri := r.Header.Get("X-Real-IP"); xri != "" {
 		return xri
 	}
-	
+
 	// Fall back to remote address
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
-	
+
 	return ip
 }
 
@@ -309,15 +309,15 @@ func (s *Server) timeoutMiddleware(timeout time.Duration) func(http.HandlerFunc)
 		return func(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			defer cancel()
-			
+
 			r = r.WithContext(ctx)
-			
+
 			done := make(chan struct{})
 			go func() {
 				next(w, r)
 				close(done)
 			}()
-			
+
 			select {
 			case <-done:
 				return
@@ -334,11 +334,11 @@ func (s *Server) recoveryMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				s.logger.Printf("❌ PANIC: %v", err)
+				s.logger.Info("PANIC: %v", err)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
 			}
 		}()
-		
+
 		next(w, r)
 	}
 }
