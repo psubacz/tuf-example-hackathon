@@ -1,0 +1,16 @@
+apiVersion: v2
+name: tuf-server
+description: A Helm chart for TUF repository server
+type: application
+version: 0.1.0
+appVersion: "2.0.0"
+keywords:
+  - tuf
+  - security
+  - update-framework
+  - go
+home: https://github.com/theupdateframework/go-tuf
+sources:
+  - https://github.com/theupdateframework/go-tuf
+maintainers:
+  - name: TUF Server Team
