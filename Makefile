@@ -7,7 +7,7 @@ setup:
 
 # Initialize TUF repository with go-tuf v2 (production)
 init-repo:
-	go run ./cmd/tuf-init
+	go run ./cmd/tuf-server
 
 # Run the go-tuf v2 client (production)
 run-client:
@@ -22,7 +22,7 @@ clean:
 test-ota:
 	@echo "🔐 Testing go-tuf v2 Production Implementation..."
 	@echo "1. Creating go-tuf v2 repository with real crypto keys..."
-	@go run ./cmd/tuf-init
+	@go run ./cmd/tuf-server
 	@echo "2. Testing go-tuf v2 client initialization..."
 	@go run ./cmd/tuf-client --repo ./tuf-repository-v2 || echo "Expected: Client bootstrap demo completed!"
 	@echo "✅ go-tuf v2 production test completed!"

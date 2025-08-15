@@ -4,18 +4,7 @@ version: '3.8'
 # Production-grade TUF implementation using official go-tuf v2 library
 
 services:
-  # TUF Repository Setup Service (go-tuf v2 - Production)
-  tuf-init:
-    build:
-      context: ../../
-      dockerfile: build/package/Dockerfile.tuf-init
-    container_name: tuf-init
-    volumes:
-      - tuf-repository:/app/tuf-repository-v2
-    networks:
-      - tuf-network
-
-  # Enhanced TUF Repository Server (go-tuf v2)
+  # TUF Repository and Server (go-tuf v2 - Production)
   tuf-server:
     build:
       context: ../../
@@ -27,8 +16,6 @@ services:
       - tuf-repository:/app/tuf-repository-v2
       - tuf-config:/app/config
       - tuf-logs:/app/logs
-    depends_on:
-      - tuf-init
     environment:
       - TUF_PORT=8080
       - TUF_HOST=0.0.0.0
