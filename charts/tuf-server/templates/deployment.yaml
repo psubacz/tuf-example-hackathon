@@ -66,11 +66,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: repository-data
+              mountPath: /app/tuf-repository
             {{- with .Values.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: repository-data
           emptyDir: {}
         {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}

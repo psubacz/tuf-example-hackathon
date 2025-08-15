@@ -6,7 +6,8 @@
       "WebFetch(domain:pkg.go.dev)",
       "Bash(go get:*)",
       "Bash(go build:*)",
-      "Bash(go doc:*)"
+      "Bash(go doc:*)",
+      "Bash(kubectl logs:*)"
     ],
     "deny": [],
     "ask": []

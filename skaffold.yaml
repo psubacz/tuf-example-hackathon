@@ -1,0 +1,115 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: tuf_server
+
+build:
+  artifacts:
+    - image: tuf_server
+      docker:
+        dockerfile: Dockerfile
+        buildArgs:
+          GO_VERSION: "1.21"
+      sync:
+        manual:
+          - src: "**/*.go"
+            dest: /app
+  tagPolicy:
+    gitCommit: {}
+
+deploy:
+  helm:
+    releases:
+      - name: tuf-server
+        chartPath: charts/tuf-server
+        valuesFiles:
+          - charts/tuf-server/values.yaml
+        setValues:
+          image.repository: "localhost/tuf_server"
+          image.tag: "fixed"
+        upgradeOnChange: true
+        createNamespace: true
+
+portForward:
+  - resourceType: service
+    resourceName: tuf_server
+    port: 8080
+    localPort: 8080
+
+profiles:
+  - name: podman
+    build:
+      artifacts:
+        - image: tuf_server
+          docker:
+            dockerfile: Dockerfile
+            buildArgs:
+              GO_VERSION: "1.24"
+      local:
+        push: false
+        useBuildkit: false
+        useDockerCLI: false
+        concurrency: 1
+    deploy:
+      helm:
+        releases:
+          - name: tuf-server
+            chartPath: charts/tuf-server
+            valuesFiles:
+              - charts/tuf-server/values.yaml
+            setValues:
+              image.repository: "localhost/tuf_server"
+              image.tag: "fixed"
+            upgradeOnChange: true
+            createNamespace: true
+
+  - name: dev
+    build:
+      artifacts:
+        - image: tuf_server
+          docker:
+            dockerfile: Dockerfile
+            target: builder
+      local:
+        push: false
+    deploy:
+      helm:
+        releases:
+          - name: tuf-server-dev
+            chartPath: charts/tuf-server
+            valuesFiles:
+              - charts/tuf-server/values.yaml
+            setValues:
+              image.repository: "localhost/tuf_server"
+              image.tag: "fixed"
+              replicaCount: 1
+              resources.requests.cpu: "100m"
+              resources.requests.memory: "128Mi"
+              resources.limits.cpu: "200m"
+              resources.limits.memory: "256Mi"
+
+  - name: prod
+    build:
+      artifacts:
+        - image: tuf_server
+          docker:
+            dockerfile: Dockerfile
+      local:
+        push: true
+    deploy:
+      helm:
+        releases:
+          - name: tuf-server-prod
+            chartPath: charts/tuf-server
+            valuesFiles:
+              - charts/tuf-server/values.yaml
+            setValues:
+              image.repository: "localhost/tuf_server"
+              image.tag: "fixed"
+              replicaCount: 3
+              autoscaling.enabled: true
+              ingress.enabled: true
+              resources.requests.cpu: "250m"
+              resources.requests.memory: "256Mi"
+              resources.limits.cpu: "500m"
+              resources.limits.memory: "512Mi"
