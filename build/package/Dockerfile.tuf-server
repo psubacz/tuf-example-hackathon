@@ -1,0 +1,75 @@
+# Multi-stage build for Enhanced TUF Server v2.0
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application with optimizations
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -a -installsuffix cgo \
+    -ldflags="-w -s" \
+    -o tuf-server ./cmd/tuf-server-demo
+
+# Final stage - using distroless for security
+FROM gcr.io/distroless/static:nonroot
+
+WORKDIR /app
+
+# Copy CA certificates and binary
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /app/tuf-server /usr/local/bin/tuf-server
+
+# Create directories with proper permissions
+USER 65532:65532
+RUN mkdir -p /app/tuf-repository /app/config /app/logs
+
+# Labels for better metadata
+LABEL maintainer="TUF Project" \
+      version="2.0.0" \
+      description="Enhanced TUF Repository Server with production features" \
+      org.opencontainers.image.title="TUF Server Enhanced" \
+      org.opencontainers.image.description="Production-ready TUF repository server" \
+      org.opencontainers.image.version="2.0.0" \
+      org.opencontainers.image.source="https://github.com/theupdateframework/tuf-golang-project"
+
+# Expose ports for HTTP and HTTPS
+EXPOSE 8080 8443
+
+# Expose volumes for persistent storage
+VOLUME ["/app/tuf-repository", "/app/config", "/app/logs"]
+
+# Environment variables for configuration
+ENV TUF_PORT=8080 \
+    TUF_HOST=0.0.0.0 \
+    TUF_REPOSITORY_PATH=/app/tuf-repository \
+    TUF_LOG_LEVEL=info \
+    TUF_LOG_FORMAT=json \
+    TUF_METRICS_ENABLED=true \
+    TUF_CORS_ENABLED=true \
+    TUF_COMPRESSION_ENABLED=true \
+    TUF_CACHE_ENABLED=true \
+    TUF_RATE_LIMIT_ENABLED=true
+
+# Enhanced health check with better configuration
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/usr/local/bin/tuf-server", "--help"] > /dev/null 2>&1 || exit 1
+
+# Alternative health check using the server's health endpoint
+# HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+#     CMD curl -f http://localhost:${TUF_PORT}/health || exit 1
+
+# Run as non-root user for security
+USER 65532:65532
+
+# Use the enhanced CLI with environment variable configuration
+ENTRYPOINT ["/usr/local/bin/tuf-server"]
+CMD ["--repo", "/app/tuf-repository"]

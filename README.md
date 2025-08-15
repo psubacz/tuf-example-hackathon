@@ -38,6 +38,10 @@ tuf-golang-project/
 │   ├── server/         # Server implementation
 │   └── tuf/            # TUF repository logic
 ├── api/                # API definitions
+├── docs/               # 📋 Architecture documentation for edge containers
+│   ├── architecture/   # Edge deployment architecture and security model
+│   ├── diagrams/       # System architecture diagrams (Mermaid)
+│   └── examples/       # Kubernetes and Docker Compose examples
 ├── README.md           # This comprehensive guide
 ├── Makefile            # Build and run commands
 ├── .gitignore          # Git ignore rules
@@ -50,7 +54,8 @@ tuf-golang-project/
 
 ## Prerequisites
 
-- Go 1.21 or later
+- Go 1.24 or later
+- Podman and Podman Compose (for containerized deployment)
 - Internet connection for downloading dependencies
 
 ## Getting Started
@@ -115,11 +120,35 @@ tuf-golang-project/
 
    This demonstrates secure network updates!
 
+### 🐳 Containerized Deployment
+
+Run the entire TUF system using Podman containers:
+
+```bash
+# Build and run all services with Podman Compose
+cd build/package
+podman-compose up --build
+
+# Or run specific services
+podman-compose up tuf-server  # Just the server
+podman-compose up network-client  # Just the network client
+```
+
+The containerized setup includes:
+- **tuf-init**: Initializes the TUF repository
+- **add-targets**: Adds additional target files
+- **tuf-server**: HTTP server on port 8080
+- **network-client**: Demonstrates over-the-air updates
+- **tuf-client**: Local client demo
+
 ### 🚀 Quick Test (Automated)
 
 ```bash
-# Test the complete workflow automatically
+# Test the complete workflow automatically (local)
 make test-ota
+
+# Test using containers
+cd build/package && podman-compose up --build
 ```
 
 ### 🌍 Network Access Options
@@ -191,6 +220,263 @@ To extend this project, you could:
 4. Implement custom metadata for application-specific needs
 5. Add rate limiting and advanced security features
 6. Integrate with CI/CD pipelines for automated updates
+
+---
+
+# 🏗️ Edge Container Architecture
+
+This project includes a comprehensive **edge container architecture** that demonstrates how to securely distribute files to edge containers using TUF with init container patterns.
+
+## 📋 Architecture Documentation
+
+Comprehensive documentation is available in the [`/docs`](./docs/) directory:
+
+- **[Edge Deployment Architecture](./docs/architecture/edge-deployment.md)**: Main architecture overview
+- **[Security Model](./docs/architecture/security-model.md)**: Security design and threat model
+- **[Deployment Patterns](./docs/architecture/deployment-patterns.md)**: Various deployment patterns
+- **[System Diagrams](./docs/diagrams/)**: Architecture diagrams using Mermaid
+
+## 🎯 Edge Use Cases
+
+The architecture supports various edge computing scenarios:
+
+- **🌐 IoT Edge Devices**: Resource-constrained devices with intermittent connectivity
+- **⚡ Edge Computing Nodes**: High-performance edge clusters with multiple applications  
+- **📡 CDN Edge Servers**: Content delivery networks requiring frequent updates
+- **🔒 Air-gapped Environments**: Secure facilities with no external network access
+
+## 🚀 Quick Start - Edge Deployment
+
+### Build Edge Init Container
+```bash
+# Build the specialized edge init container
+podman build -f build/package/Dockerfile.edge-init -t tuf-edge-init:latest .
+```
+
+### Run Edge Stack
+```bash
+# Start complete edge development environment
+cd docs/examples/docker-compose
+podman-compose -f edge-stack.yml up --build
+```
+
+### Deploy to Kubernetes
+```bash
+# Deploy production edge architecture
+kubectl apply -f docs/examples/kubernetes/edge-deployment.yaml
+```
+
+## 🔐 Edge Security Features
+
+- **Init Container Pattern**: Secure file verification before application starts
+- **Cryptographic Verification**: Ed25519/RSA signatures on all files
+- **Zero Trust**: All files verified regardless of transport security
+- **Container Security**: Read-only filesystems, non-root users, minimal privileges
+
+## 📊 Architecture Overview
+
+```mermaid
+graph TB
+    TR[TUF Repository] --> CDN[CDN/Proxy]
+    CDN --> INIT[Edge Init Container]
+    INIT --> VOL[Shared Volume]
+    VOL --> APP[Edge Application]
+```
+
+The edge architecture uses an **init container pattern** where:
+1. Edge containers start with a TUF init container
+2. Init container downloads and verifies files from TUF repository  
+3. Files are shared with main application via volumes
+4. Application uses pre-verified, tamper-proof files
+
+📖 **[Read the complete architecture documentation →](./docs/README.md)**
+
+---
+
+# 🐳 Containerized Deployment Guide
+
+This section covers deploying the TUF repository using Docker containers, following the `/build` directory structure.
+
+## Container Architecture
+
+All containerized deployment files are located under `/build/package/`:
+
+```
+build/
+├── package/
+│   ├── Dockerfile.tuf-demo          # TUF repository initialization
+│   ├── Dockerfile.tuf-server        # TUF HTTP server
+│   ├── Dockerfile.tuf-client        # Local TUF client demo
+│   ├── Dockerfile.network-client    # Network TUF client
+│   ├── Dockerfile.add-targets       # Utility to add more targets
+│   └── docker-compose.yml           # Complete orchestration
+└── ci/                              # CI/CD configurations (future)
+```
+
+## Quick Start with Docker Compose
+
+```bash
+# Navigate to the package directory
+cd build/package
+
+# Build and run the entire TUF ecosystem
+docker-compose up --build
+
+# View the TUF server web interface
+open http://localhost:8080
+```
+
+## Individual Container Usage
+
+### TUF Repository Server
+
+```bash
+# Build the server container
+docker build -f build/package/Dockerfile.tuf-server -t tuf-server .
+
+# Run with persistent storage
+docker run -d \
+  --name tuf-server \
+  -p 8080:8080 \
+  -v tuf-repository:/app/tuf-repository \
+  tuf-server
+```
+
+### Network TUF Client
+
+```bash
+# Build the network client
+docker build -f build/package/Dockerfile.network-client -t tuf-network-client .
+
+# Run the client (connects to server)
+docker run --rm \
+  --name tuf-client \
+  --link tuf-server:tuf-server \
+  -v network-client-cache:/app/network-client-cache \
+  tuf-network-client
+```
+
+### Repository Initialization
+
+```bash
+# Initialize repository in a container
+docker build -f build/package/Dockerfile.tuf-demo -t tuf-init .
+docker run --rm -v tuf-repository:/app/tuf-repository tuf-init
+
+# Add additional targets
+docker build -f build/package/Dockerfile.add-targets -t tuf-add-targets .
+docker run --rm -v tuf-repository:/app/tuf-repository tuf-add-targets
+```
+
+## Production Container Deployment
+
+### Using Docker Swarm
+
+```yaml
+# docker-stack.yml
+version: '3.8'
+services:
+  tuf-server:
+    image: your-registry/tuf-server:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - tuf-data:/app/tuf-repository
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+volumes:
+  tuf-data:
+    driver: local
+```
+
+```bash
+# Deploy to Docker Swarm
+docker stack deploy -c docker-stack.yml tuf-stack
+```
+
+### Using Kubernetes
+
+```yaml
+# k8s-deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tuf-server
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: tuf-server
+  template:
+    metadata:
+      labels:
+        app: tuf-server
+    spec:
+      containers:
+      - name: tuf-server
+        image: your-registry/tuf-server:latest
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: tuf-storage
+          mountPath: /app/tuf-repository
+      volumes:
+      - name: tuf-storage
+        persistentVolumeClaim:
+          claimName: tuf-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tuf-server-service
+spec:
+  selector:
+    app: tuf-server
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: LoadBalancer
+```
+
+## Container Security Best Practices
+
+1. **Multi-stage builds**: All Dockerfiles use multi-stage builds to minimize attack surface
+2. **Non-root user**: Containers run with minimal privileges
+3. **Health checks**: Server containers include health check endpoints
+4. **Secrets management**: Use Docker secrets or Kubernetes secrets for sensitive data
+5. **Registry security**: Push to private registries with vulnerability scanning
+
+## Monitoring and Logging
+
+### Container Logs
+
+```bash
+# View logs from all services
+docker-compose logs -f
+
+# View specific service logs
+docker-compose logs -f tuf-server
+docker-compose logs -f network-client
+```
+
+### Health Monitoring
+
+```bash
+# Check container health
+docker ps
+docker-compose ps
+
+# Manual health check
+curl http://localhost:8080/health
+```
 
 ---
 

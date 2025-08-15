@@ -1,0 +1,17 @@
+{
+  "signatures": [],
+  "signed": {
+    "_type": "targets",
+    "expires": "2026-08-15T15:35:07.840392-04:00",
+    "spec_version": "1.0.31",
+    "targets": {
+      "sample.txt": {
+        "hashes": {
+          "sha256": "64656d6f5f686173685f76616c75655f666f725f73616d706c652e747874"
+        },
+        "length": 318
+      }
+    },
+    "version": 1
+  }
+}

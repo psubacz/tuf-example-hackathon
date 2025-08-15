@@ -1,0 +1,364 @@
+# Kubernetes deployment example for TUF edge containers
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tuf-edge
+  labels:
+    name: tuf-edge
+    security: restricted
+
+---
+# ConfigMap for TUF configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tuf-config
+  namespace: tuf-edge
+data:
+  server_url: "https://tuf.example.com"
+  log_level: "info"
+  timeout: "300s"
+  retry_attempts: "3"
+
+---
+# Secret for TUF root keys (should be created securely)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tuf-root-keys
+  namespace: tuf-edge
+type: Opaque
+data:
+  # Base64 encoded root.json - replace with actual root keys
+  root.json: ewogICJfdHlwZSI6ICJyb290IiwKICAidmVyc2lvbiI6IDEsCiAgImV4cGlyZXMiOiAiMjAyNi0wMS0xNVQxMDozMDowMFoiLAogICJrZXlzIjogewogICAgImtleTEiOiB7CiAgICAgICJrZXl0eXBlIjogImVkMjU1MTkiLAogICAgICAic2NoZW1lIjogImVkMjU1MTkiLAogICAgICAia2V5dmFsIjogewogICAgICAgICJwdWJsaWMiOiAiZGVtb19wdWJsaWNfa2V5X2RhdGEiCiAgICAgIH0KICAgIH0KICB9LAogICJyb2xlcyI6IHsKICAgICJyb290IjogewogICAgICAia2V5aWRzIjogWyJrZXkxIl0sCiAgICAgICJ0aHJlc2hvbGQiOiAxCiAgICB9CiAgfQp9
+
+---
+# PersistentVolumeClaim for TUF cache
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tuf-cache-pvc
+  namespace: tuf-edge
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# NetworkPolicy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tuf-edge-network-policy
+  namespace: tuf-edge
+spec:
+  podSelector:
+    matchLabels:
+      app: edge-application
+  policyTypes:
+  - Ingress
+  - Egress
+  egress:
+  # Allow TUF repository access
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  ingress:
+  # Allow health checks from monitoring
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8080
+
+---
+# Deployment with init container pattern
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-application
+  namespace: tuf-edge
+  labels:
+    app: edge-application
+    version: v1.0.0
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: edge-application
+  template:
+    metadata:
+      labels:
+        app: edge-application
+        version: v1.0.0
+      annotations:
+        # Security annotations
+        container.apparmor.security.beta.kubernetes.io/tuf-init: runtime/default
+        container.apparmor.security.beta.kubernetes.io/edge-app: runtime/default
+    spec:
+      serviceAccountName: edge-service-account
+      
+      # Security context for the pod
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      
+      # Init container for TUF file verification
+      initContainers:
+      - name: tuf-init
+        image: tuf-edge-init:latest
+        imagePullPolicy: Always
+        
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65534
+          runAsGroup: 65534
+          capabilities:
+            drop:
+            - ALL
+        
+        # Environment variables from ConfigMap and Secret
+        env:
+        - name: TUF_SERVER_URL
+          valueFrom:
+            configMapKeyRef:
+              name: tuf-config
+              key: server_url
+        - name: TUF_LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: tuf-config
+              key: log_level
+        - name: TUF_TIMEOUT
+          valueFrom:
+            configMapKeyRef:
+              name: tuf-config
+              key: timeout
+        - name: TUF_RETRY_ATTEMPTS
+          valueFrom:
+            configMapKeyRef:
+              name: tuf-config
+              key: retry_attempts
+        - name: TUF_ROOT_KEYS_PATH
+          value: "/config/root.json"
+        - name: TUF_TARGET_DIR
+          value: "/shared"
+        - name: TUF_CACHE_DIR
+          value: "/cache"
+        
+        # Command and args
+        command: ["/usr/local/bin/edge-init"]
+        args: 
+          - "--verify-all"
+          - "--one-shot"
+          - "--targets=config.json,app-settings.yaml,*.tgz"
+        
+        # Volume mounts
+        volumeMounts:
+        - name: shared-files
+          mountPath: /shared
+        - name: tuf-cache
+          mountPath: /cache
+        - name: tuf-config-volume
+          mountPath: /config
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        
+        # Resource limits
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        
+        # Startup probe
+        startupProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "[ -f /shared/.tuf-init-complete ]"
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 60  # Allow up to 5 minutes for initialization
+      
+      # Main application container
+      containers:
+      - name: edge-app
+        image: my-edge-app:latest
+        imagePullPolicy: Always
+        
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65534
+          runAsGroup: 65534
+          capabilities:
+            drop:
+            - ALL
+        
+        # Environment variables
+        env:
+        - name: APP_CONFIG_DIR
+          value: "/app/files"
+        - name: APP_LOG_LEVEL
+          value: "info"
+        
+        # Volume mounts
+        volumeMounts:
+        - name: shared-files
+          mountPath: /app/files
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        
+        # Resource limits
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 250m
+            memory: 256Mi
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        
+        # Container ports
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+      
+      # Volumes
+      volumes:
+      - name: shared-files
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: tuf-cache
+        persistentVolumeClaim:
+          claimName: tuf-cache-pvc
+      - name: tuf-config-volume
+        secret:
+          secretName: tuf-root-keys
+          defaultMode: 0400
+      - name: tmp
+        emptyDir:
+          sizeLimit: 100Mi
+      
+      # Pod scheduling
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - edge-application
+              topologyKey: kubernetes.io/hostname
+      
+      # Tolerations for edge nodes
+      tolerations:
+      - key: edge
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+---
+# Service for the edge application
+apiVersion: v1
+kind: Service
+metadata:
+  name: edge-application-service
+  namespace: tuf-edge
+  labels:
+    app: edge-application
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: edge-application
+
+---
+# ServiceAccount for the edge application
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: edge-service-account
+  namespace: tuf-edge
+automountServiceAccountToken: false
+
+---
+# ServiceMonitor for Prometheus monitoring (if using Prometheus Operator)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: edge-application-monitor
+  namespace: tuf-edge
+  labels:
+    app: edge-application
+spec:
+  selector:
+    matchLabels:
+      app: edge-application
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s

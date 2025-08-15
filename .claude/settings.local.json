@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "WebFetch(domain:pkg.go.dev)",
+      "Bash(go get:*)",
+      "Bash(go build:*)",
+      "Bash(go doc:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

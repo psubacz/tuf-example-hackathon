@@ -1,0 +1,294 @@
+version: '3.8'
+
+# Podman Compose example for TUF edge deployment
+# This demonstrates the init container pattern using Podman Compose
+
+services:
+  # TUF Repository Server (for development/testing)
+  tuf-server:
+    build:
+      context: ../../
+      dockerfile: build/package/Dockerfile.tuf-server
+    container_name: tuf-server
+    ports:
+      - "8080:8080"
+    volumes:
+      - tuf-repository:/app/tuf-repository
+    environment:
+      - TUF_PORT=8080
+      - TUF_REPO_PATH=/app/tuf-repository
+      - TUF_LOG_LEVEL=info
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - tuf-network
+    restart: unless-stopped
+
+  # Initialize TUF repository (runs once)
+  tuf-init:
+    build:
+      context: ../../
+      dockerfile: build/package/Dockerfile.tuf-demo
+    container_name: tuf-init
+    volumes:
+      - tuf-repository:/app/tuf-repository
+    command: ["../root/tuf-demo"]
+    networks:
+      - tuf-network
+    restart: "no"
+
+  # Add sample targets (runs once after init)
+  add-targets:
+    build:
+      context: ../../
+      dockerfile: build/package/Dockerfile.add-targets
+    container_name: tuf-add-targets
+    volumes:
+      - tuf-repository:/app/tuf-repository
+    depends_on:
+      - tuf-init
+    command: ["../root/add-targets"]
+    networks:
+      - tuf-network
+    restart: "no"
+
+  # Edge Application 1 - Demonstrates init container pattern
+  edge-app-1:
+    image: alpine:latest
+    container_name: edge-app-1
+    depends_on:
+      edge-init-1:
+        condition: service_completed_successfully
+      tuf-server:
+        condition: service_healthy
+    volumes:
+      - edge-files-1:/app/files:ro
+      - edge-logs-1:/app/logs
+    environment:
+      - APP_NAME=edge-app-1
+      - APP_CONFIG_DIR=/app/files
+      - APP_LOG_LEVEL=info
+    working_dir: /app
+    command: |
+      sh -c '
+        echo "Starting Edge Application 1..."
+        echo "Checking for required files..."
+        ls -la /app/files/
+        echo "Configuration files available:"
+        find /app/files -name "*.json" -o -name "*.yaml" -o -name "*.conf" | head -10
+        echo "Application running with verified files from TUF"
+        while true; do
+          echo "[$(date)] Edge App 1 heartbeat - Files: $(ls /app/files | wc -l)"
+          sleep 30
+        done
+      '
+    networks:
+      - tuf-network
+    restart: unless-stopped
+    labels:
+      - "app=edge-application"
+      - "instance=edge-app-1"
+
+  # Init container for Edge Application 1
+  edge-init-1:
+    build:
+      context: ../../
+      dockerfile: build/package/Dockerfile.edge-init
+    container_name: edge-init-1
+    depends_on:
+      tuf-server:
+        condition: service_healthy
+    volumes:
+      - edge-files-1:/shared
+      - edge-cache-1:/cache
+      - ./config:/config:ro
+    environment:
+      - TUF_SERVER_URL=http://tuf-server:8080
+      - TUF_ROOT_KEYS_PATH=/config/root.json
+      - TUF_TARGET_DIR=/shared
+      - TUF_CACHE_DIR=/cache
+      - TUF_LOG_LEVEL=info
+      - TUF_TIMEOUT=120s
+      - TUF_RETRY_ATTEMPTS=3
+    command: ["--verify-all", "--one-shot"]
+    networks:
+      - tuf-network
+    restart: "no"
+    labels:
+      - "app=tuf-init"
+      - "instance=edge-init-1"
+
+  # Edge Application 2 - Different configuration
+  edge-app-2:
+    image: alpine:latest
+    container_name: edge-app-2
+    depends_on:
+      edge-init-2:
+        condition: service_completed_successfully
+      tuf-server:
+        condition: service_healthy
+    volumes:
+      - edge-files-2:/app/files:ro
+      - edge-logs-2:/app/logs
+    environment:
+      - APP_NAME=edge-app-2
+      - APP_CONFIG_DIR=/app/files
+      - APP_LOG_LEVEL=debug
+    working_dir: /app
+    command: |
+      sh -c '
+        echo "Starting Edge Application 2 (Selective Files)..."
+        echo "Checking for specific configuration files..."
+        ls -la /app/files/
+        if [ -f "/app/files/config.json" ]; then
+          echo "Found config.json:"
+          cat /app/files/config.json
+        fi
+        echo "Application 2 running with selective TUF files"
+        while true; do
+          echo "[$(date)] Edge App 2 heartbeat - Config files: $(find /app/files -name "*.json" | wc -l)"
+          sleep 45
+        done
+      '
+    networks:
+      - tuf-network
+    restart: unless-stopped
+    labels:
+      - "app=edge-application"
+      - "instance=edge-app-2"
+
+  # Init container for Edge Application 2 (selective files)
+  edge-init-2:
+    build:
+      context: ../../
+      dockerfile: build/package/Dockerfile.edge-init
+    container_name: edge-init-2
+    depends_on:
+      tuf-server:
+        condition: service_healthy
+    volumes:
+      - edge-files-2:/shared
+      - edge-cache-2:/cache
+      - ./config:/config:ro
+    environment:
+      - TUF_SERVER_URL=http://tuf-server:8080
+      - TUF_ROOT_KEYS_PATH=/config/root.json
+      - TUF_TARGET_DIR=/shared
+      - TUF_CACHE_DIR=/cache
+      - TUF_LOG_LEVEL=info
+      - TUF_TIMEOUT=120s
+      - TUF_RETRY_ATTEMPTS=3
+    command: ["--targets=*.json,*.yaml,config.*"]
+    networks:
+      - tuf-network
+    restart: "no"
+    labels:
+      - "app=tuf-init"
+      - "instance=edge-init-2"
+
+  # Monitoring service
+  monitoring:
+    image: prom/prometheus:latest
+    container_name: tuf-monitoring
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - tuf-network
+    restart: unless-stopped
+    labels:
+      - "app=monitoring"
+
+  # Log aggregation
+  log-aggregator:
+    image: grafana/loki:latest
+    container_name: tuf-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/tmp/loki
+      - ./monitoring/loki.yml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - tuf-network
+    restart: unless-stopped
+    labels:
+      - "app=logging"
+
+  # Visualization dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: tuf-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/tuf-edge-overview.json
+    networks:
+      - tuf-network
+    restart: unless-stopped
+    labels:
+      - "app=visualization"
+
+# Volumes for persistent data
+volumes:
+  # TUF repository data
+  tuf-repository:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/tuf-repository
+
+  # Edge application files (shared via init containers)
+  edge-files-1:
+    driver: local
+  edge-files-2:
+    driver: local
+  
+  # Cache volumes for TUF clients
+  edge-cache-1:
+    driver: local
+  edge-cache-2:
+    driver: local
+  
+  # Application logs
+  edge-logs-1:
+    driver: local
+  edge-logs-2:
+    driver: local
+  
+  # Monitoring data
+  prometheus-data:
+    driver: local
+  loki-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+# Networks
+networks:
+  tuf-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+    driver_opts:
+      com.docker.network.bridge.name: tuf-edge-br0

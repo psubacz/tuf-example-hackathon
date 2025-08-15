@@ -1,0 +1,136 @@
+version: '3.8'
+
+# Podman Compose configuration for TUF
+# Note: Podman Compose is compatible with Docker Compose format
+
+services:
+  # TUF Repository Setup Service (runs once to initialize)
+  tuf-init:
+    build:
+      context: ../../
+      dockerfile: build/package/Dockerfile.tuf-demo
+    container_name: tuf-init
+    volumes:
+      - tuf-repository:/app/tuf-repository
+    command: ["../root/tuf-demo"]
+    networks:
+      - tuf-network
+
+  # Add additional targets (runs after init)
+  add-targets:
+    build:
+      context: ../../
+      dockerfile: build/package/Dockerfile.add-targets
+    container_name: tuf-add-targets
+    volumes:
+      - tuf-repository:/app/tuf-repository
+    depends_on:
+      - tuf-init
+    command: ["../root/add-targets"]
+    networks:
+      - tuf-network
+
+  # Enhanced TUF Repository Server v2.0
+  tuf-server:
+    build:
+      context: ../../
+      dockerfile: build/package/Dockerfile.tuf-server
+    container_name: tuf-server-enhanced
+    ports:
+      - "8080:8080"    # HTTP port
+      - "8443:8443"    # HTTPS port (if TLS enabled)
+    volumes:
+      - tuf-repository:/app/tuf-repository
+      - tuf-config:/app/config
+      - tuf-logs:/app/logs
+    depends_on:
+      - tuf-init
+      - add-targets
+    environment:
+      # Core server settings
+      - TUF_PORT=8080
+      - TUF_HOST=0.0.0.0
+      - TUF_REPOSITORY_PATH=/app/tuf-repository
+      - TUF_LOG_LEVEL=info
+      - TUF_LOG_FORMAT=json
+      
+      # Performance settings
+      - TUF_COMPRESSION_ENABLED=true
+      - TUF_CACHE_ENABLED=true
+      - TUF_CACHE_TTL=5m
+      
+      # Security settings
+      - TUF_CORS_ENABLED=true
+      - TUF_RATE_LIMIT_ENABLED=true
+      - TUF_RATE_LIMIT_REQUESTS=1000
+      
+      # Monitoring
+      - TUF_METRICS_ENABLED=true
+      
+      # Optional TLS (uncomment to enable HTTPS)
+      # - TUF_TLS_ENABLED=true
+      # - TUF_TLS_CERT_FILE=/app/config/server.crt
+      # - TUF_TLS_KEY_FILE=/app/config/server.key
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - tuf-network
+    labels:
+      - "com.example.service=tuf-server"
+      - "com.example.version=2.0.0"
+      - "traefik.enable=true"
+      - "traefik.http.routers.tuf-server.rule=Host(`tuf.localhost`)"
+      - "traefik.http.services.tuf-server.loadbalancer.server.port=8080"
+
+  # Local TUF Client Demo
+  tuf-client:
+    build:
+      context: ../../
+      dockerfile: build/package/Dockerfile.tuf-client
+    container_name: tuf-client
+    volumes:
+      - tuf-repository:/app/tuf-repository:ro
+      - client-cache:/app/client-cache
+    depends_on:
+      - tuf-server
+    networks:
+      - tuf-network
+
+  # Network TUF Client Demo
+  network-client:
+    build:
+      context: ../../
+      dockerfile: build/package/Dockerfile.network-client
+    container_name: tuf-network-client
+    volumes:
+      - network-client-cache:/app/network-client-cache
+    depends_on:
+      tuf-server:
+        condition: service_healthy
+    environment:
+      - TUF_SERVER_URL=http://tuf-server:8080
+      - TUF_CACHE_DIR=/app/network-client-cache
+    command: ["../root/network-client", "--server", "http://tuf-server:8080", "--cache", "/app/network-client-cache"]
+    networks:
+      - tuf-network
+
+volumes:
+  tuf-repository:
+    driver: local
+  tuf-config:
+    driver: local
+  tuf-logs:
+    driver: local
+  client-cache:
+    driver: local
+  network-client-cache:
+    driver: local
+
+networks:
+  tuf-network:
+    driver: bridge

@@ -124,8 +124,12 @@ func (r *Repository) createMetadata() error {
 		Type:    "snapshot",
 		Version: 1,
 		Expires: expirationTime,
+		Meta: map[string]struct {
+			Version int `json:"version"`
+		}{
+			"targets.json": {Version: 1},
+		},
 	}
-	snapshot.Meta.TargetsJSON.Version = 1
 
 	if err := r.saveMetadata("snapshot.json", snapshot); err != nil {
 		return fmt.Errorf("failed to save snapshot metadata: %w", err)
@@ -136,8 +140,12 @@ func (r *Repository) createMetadata() error {
 		Type:    "timestamp",
 		Version: 1,
 		Expires: expirationTime,
+		Meta: map[string]struct {
+			Version int `json:"version"`
+		}{
+			"snapshot.json": {Version: 1},
+		},
 	}
-	timestamp.Meta.SnapshotJSON.Version = 1
 
 	if err := r.saveMetadata("timestamp.json", timestamp); err != nil {
 		return fmt.Errorf("failed to save timestamp metadata: %w", err)

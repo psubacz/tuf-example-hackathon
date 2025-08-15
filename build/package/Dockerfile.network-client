@@ -1,0 +1,38 @@
+# Multi-stage build for Network TUF Client
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o network-client ./cmd/network-client-demo
+
+# Final stage
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates wget
+WORKDIR /root/
+
+# Copy the binary
+COPY --from=builder /app/network-client .
+
+# Create directory for client cache
+RUN mkdir -p /app/network-client-cache
+
+WORKDIR /app
+
+# Expose volume for cache
+VOLUME ["/app/network-client-cache"]
+
+# Environment variables for configuration
+ENV TUF_SERVER_URL=http://tuf-server:8080
+ENV TUF_CACHE_DIR=/app/network-client-cache
+
+# Run the application
+CMD ["../root/network-client", "--server", "${TUF_SERVER_URL}", "--cache", "${TUF_CACHE_DIR}"]

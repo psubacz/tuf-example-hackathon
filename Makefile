@@ -59,10 +59,36 @@ help:
 	@echo "  add-targets     - Add more files to repository"
 	@echo "  test-ota        - Test complete over-the-air workflow"
 	@echo "  clean           - Remove generated files"
+	@echo "  build-containers - Build all Docker containers"
+	@echo "  run-containers  - Run containerized TUF stack"
+	@echo "  stop-containers - Stop containerized services"
+	@echo "  container-logs  - View container logs"
+	@echo "  container-help  - Show container commands help"
 	@echo "  help            - Show this help message"
 	@echo ""
 	@echo "📖 For complete guide including deployment, see README.md"
 	@echo "🌐 For network access: go run ./cmd/tuf-server-demo then go run ./cmd/network-client-demo"
+	@echo ""
+	@echo "🐳 Container Commands:"
+	@echo "  build-containers  - Build all Docker containers"
+	@echo "  run-containers    - Run containerized TUF stack"
+	@echo "  stop-containers   - Stop containerized services"
+
+# Container management commands
+build-containers:
+	cd build/package && make build
+
+run-containers:
+	cd build/package && make up
+
+stop-containers:
+	cd build/package && make down
+
+container-logs:
+	cd build/package && make logs
+
+container-help:
+	cd build/package && make help
 
 # Default target
 all: setup init-repo add-targets
