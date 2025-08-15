@@ -1,0 +1,52 @@
+# Multi-stage build for TUF Demo v2 (go-tuf v2)
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application with optimizations
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -a -installsuffix cgo \
+    -ldflags="-w -s" \
+    -o tuf-init ./cmd/tuf-init
+
+# Final stage - using distroless for security
+FROM gcr.io/distroless/static:nonroot
+
+WORKDIR /app
+
+# Copy CA certificates and binary
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /app/tuf-init /usr/local/bin/tuf-init
+
+# Create directories with proper permissions
+USER 65532:65532
+
+# Labels for better metadata
+LABEL maintainer="TUF Project" \
+      version="2.0.0" \
+      description="TUF Repository Initialization with go-tuf v2" \
+      org.opencontainers.image.title="TUF Demo v2" \
+      org.opencontainers.image.description="Creates TUF repository using official go-tuf v2 library" \
+      org.opencontainers.image.version="2.0.0"
+
+# Expose volume for repository
+VOLUME ["/app/tuf-repository-v2"]
+
+# Environment variables
+ENV TUF_REPOSITORY_PATH=/app/tuf-repository-v2
+
+# Run as non-root user for security
+USER 65532:65532
+
+# Create TUF repository with go-tuf v2
+ENTRYPOINT ["/usr/local/bin/tuf-init"]

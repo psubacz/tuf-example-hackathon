@@ -1,12 +1,17 @@
 package tuf
 
 import (
+	"crypto"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/sigstore/sigstore/pkg/signature"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
@@ -90,11 +95,6 @@ func (r *RepositoryV2) createMetadataV2() error {
 
 	fmt.Printf("✅ Generated %d cryptographic keys for TUF roles\n", len(rootMetadata.Signed.Keys))
 
-	// Save root metadata
-	if err := r.saveMetadataV2("root.json", rootMetadata); err != nil {
-		return fmt.Errorf("failed to save root metadata: %w", err)
-	}
-
 	// Create targets metadata using factory function
 	targetsMetadata := metadata.Targets(expirationTime)
 	targetsMetadata.Signed.Version = 1
@@ -105,20 +105,11 @@ func (r *RepositoryV2) createMetadataV2() error {
 		return fmt.Errorf("failed to add sample target: %w", err)
 	}
 
-	// Save targets metadata
-	if err := r.saveMetadataV2("targets.json", targetsMetadata); err != nil {
-		return fmt.Errorf("failed to save targets metadata: %w", err)
-	}
-
 	// Create snapshot metadata using factory function
 	snapshotMetadata := metadata.Snapshot(expirationTime)
 	snapshotMetadata.Signed.Version = 1
 	snapshotMetadata.Signed.Meta = map[string]*metadata.MetaFiles{
 		"targets.json": metadata.MetaFile(1),
-	}
-
-	if err := r.saveMetadataV2("snapshot.json", snapshotMetadata); err != nil {
-		return fmt.Errorf("failed to save snapshot metadata: %w", err)
 	}
 
 	// Create timestamp metadata using factory function
@@ -128,8 +119,59 @@ func (r *RepositoryV2) createMetadataV2() error {
 		"snapshot.json": metadata.MetaFile(1),
 	}
 
+	// Sign all metadata with their respective keys
+	fmt.Println("🔐 Signing metadata with generated keys...")
+	
+	// Sign targets metadata
+	targetsSigner, err := signature.LoadSigner(keyManager.GetTargetsKey().PrivateKey, crypto.Hash(0))
+	if err != nil {
+		return fmt.Errorf("failed to create targets signer: %w", err)
+	}
+	if _, err := targetsMetadata.Sign(targetsSigner); err != nil {
+		return fmt.Errorf("failed to sign targets metadata: %w", err)
+	}
+
+	// Sign snapshot metadata
+	snapshotSigner, err := signature.LoadSigner(keyManager.GetSnapshotKey().PrivateKey, crypto.Hash(0))
+	if err != nil {
+		return fmt.Errorf("failed to create snapshot signer: %w", err)
+	}
+	if _, err := snapshotMetadata.Sign(snapshotSigner); err != nil {
+		return fmt.Errorf("failed to sign snapshot metadata: %w", err)
+	}
+
+	// Sign timestamp metadata
+	timestampSigner, err := signature.LoadSigner(keyManager.GetTimestampKey().PrivateKey, crypto.Hash(0))
+	if err != nil {
+		return fmt.Errorf("failed to create timestamp signer: %w", err)
+	}
+	if _, err := timestampMetadata.Sign(timestampSigner); err != nil {
+		return fmt.Errorf("failed to sign timestamp metadata: %w", err)
+	}
+
+	// Sign root metadata
+	rootSigner, err := signature.LoadSigner(keyManager.GetRootKey().PrivateKey, crypto.Hash(0))
+	if err != nil {
+		return fmt.Errorf("failed to create root signer: %w", err)
+	}
+	if _, err := rootMetadata.Sign(rootSigner); err != nil {
+		return fmt.Errorf("failed to sign root metadata: %w", err)
+	}
+
+	fmt.Println("✅ All metadata signed successfully")
+
+	// Save all signed metadata
+	if err := r.saveMetadataV2("root.json", rootMetadata); err != nil {
+		return fmt.Errorf("failed to save signed root metadata: %w", err)
+	}
+	if err := r.saveMetadataV2("targets.json", targetsMetadata); err != nil {
+		return fmt.Errorf("failed to save signed targets metadata: %w", err)
+	}
+	if err := r.saveMetadataV2("snapshot.json", snapshotMetadata); err != nil {
+		return fmt.Errorf("failed to save signed snapshot metadata: %w", err)
+	}
 	if err := r.saveMetadataV2("timestamp.json", timestampMetadata); err != nil {
-		return fmt.Errorf("failed to save timestamp metadata: %w", err)
+		return fmt.Errorf("failed to save signed timestamp metadata: %w", err)
 	}
 
 	return nil
@@ -144,15 +186,28 @@ func (r *RepositoryV2) addFileToTargetsV2(targets *metadata.Metadata[metadata.Ta
 		return fmt.Errorf("failed to get file info for %s: %w", filename, err)
 	}
 
-	// In a production implementation, this would calculate real hashes
-	// For this demo, we'll use placeholder values
+	// Calculate real SHA256 hash
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file %s: %w", filename, err)
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return fmt.Errorf("failed to calculate hash for %s: %w", filename, err)
+	}
+	hashBytes := hash.Sum(nil)
+
+	// Create target file with real hash and length
 	targetFile := metadata.TargetFile()
 	targetFile.Length = fileInfo.Size()
 	targetFile.Hashes = metadata.Hashes{
-		"sha256": []byte("demo_hash_value_for_" + filename),
+		"sha256": hashBytes,
 	}
 
 	targets.Signed.Targets[filename] = targetFile
+	fmt.Printf("✅ Added target file: %s (size: %d, sha256: %s)\n", filename, fileInfo.Size(), hex.EncodeToString(hashBytes))
 	return nil
 }
 

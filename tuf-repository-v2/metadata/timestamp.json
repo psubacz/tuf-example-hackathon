@@ -1,8 +1,13 @@
 {
-  "signatures": [],
+  "signatures": [
+    {
+      "keyid": "a950052b14931047760e433a402df98a94b15a34dcd2c29565d70643e8d0cc8d",
+      "sig": "222fe70bfb3507949021c6915a9733adceb29287c63890ef2febdfe29dc6cc8a83ab87170936a2ada6ae787b0906c6e87411fd694040e5b59fe2a416d8a9fa04"
+    }
+  ],
   "signed": {
     "_type": "timestamp",
-    "expires": "2026-08-15T15:35:07.840392-04:00",
+    "expires": "2026-08-15T15:54:48.860494-04:00",
     "meta": {
       "snapshot.json": {
         "version": 1

@@ -1,13 +1,18 @@
 {
-  "signatures": [],
+  "signatures": [
+    {
+      "keyid": "5b75294f009db4c14c466d724b2a57c1aa237b06b10b97751b8a7677a10178dc",
+      "sig": "47bf2526374de4429beba9f4536c8299cd60a7c9fba7c8dd3c3ca57d0629123b8ef387a0524a2a3041b562b6bc610c55a2da7061000953878745a7e920e45509"
+    }
+  ],
   "signed": {
     "_type": "targets",
-    "expires": "2026-08-15T15:35:07.840392-04:00",
+    "expires": "2026-08-15T15:54:48.860494-04:00",
     "spec_version": "1.0.31",
     "targets": {
       "sample.txt": {
         "hashes": {
-          "sha256": "64656d6f5f686173685f76616c75655f666f725f73616d706c652e747874"
+          "sha256": "097fdb43a1a01af0bd43ba2b870309d71e9f72592871c137ade1695ca190e471"
         },
         "length": 318
       }
