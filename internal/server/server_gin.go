@@ -185,6 +185,7 @@ func NewGinServer(config *Config) *GinServer {
 			InitialWait: 1 * time.Second,
 			MaxWait:     30 * time.Second,
 		},
+		CACertFile:     config.TLS.CACertFile, // Pass CA cert file for HTTPS webhook requests
 	}
 	webhookStore := webhook.NewMemoryEventStore()
 	webhookManager = webhook.NewManager(webhookConfig, webhookStore)

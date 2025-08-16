@@ -22,6 +22,7 @@ type Config struct {
 	ConfigFile  string `mapstructure:"config_file"`
 	OutputFormat string `mapstructure:"output_format"`
 	Verbose     bool   `mapstructure:"verbose"`
+	CACertFile  string `mapstructure:"ca_cert_file"`
 }
 
 // NewApp creates a new CLI application
@@ -46,6 +47,7 @@ managing API keys, rotating keys, and checking server status.`,
 	app.rootCmd.PersistentFlags().StringVar(&app.config.ConfigFile, "config", "", "Config file (default: $HOME/.tuf-cli.yaml)")
 	app.rootCmd.PersistentFlags().StringVarP(&app.config.OutputFormat, "output", "o", "text", "Output format (text, json, yaml)")
 	app.rootCmd.PersistentFlags().BoolVarP(&app.config.Verbose, "verbose", "v", false, "Verbose output")
+	app.rootCmd.PersistentFlags().StringVar(&app.config.CACertFile, "ca-cert", "", "Path to CA certificate file for self-signed certificates")
 
 	// Bind flags to viper
 	_ = viper.BindPFlag("server_url", app.rootCmd.PersistentFlags().Lookup("server"))
@@ -53,6 +55,7 @@ managing API keys, rotating keys, and checking server status.`,
 	_ = viper.BindPFlag("jwt_token", app.rootCmd.PersistentFlags().Lookup("jwt"))
 	_ = viper.BindPFlag("output_format", app.rootCmd.PersistentFlags().Lookup("output"))
 	_ = viper.BindPFlag("verbose", app.rootCmd.PersistentFlags().Lookup("verbose"))
+	_ = viper.BindPFlag("ca_cert_file", app.rootCmd.PersistentFlags().Lookup("ca-cert"))
 
 	// Add commands
 	app.addCommands()

@@ -85,10 +85,11 @@ type AdminUser struct {
 
 // TLSConfig holds TLS/HTTPS configuration
 type TLSConfig struct {
-	Enabled  bool   `json:"enabled"`
-	CertFile string `json:"cert_file"`
-	KeyFile  string `json:"key_file"`
-	AutoTLS  bool   `json:"auto_tls"`
+	Enabled    bool   `json:"enabled"`
+	CertFile   string `json:"cert_file"`
+	KeyFile    string `json:"key_file"`
+	AutoTLS    bool   `json:"auto_tls"`
+	CACertFile string `json:"ca_cert_file"` // Custom CA certificate for client connections
 }
 
 // CORSConfig holds CORS configuration
@@ -555,6 +556,10 @@ func (c *Config) loadFromEnv() {
 	
 	if val := os.Getenv("TUF_TLS_KEY_FILE"); val != "" {
 		c.TLS.KeyFile = val
+	}
+	
+	if val := os.Getenv("TUF_TLS_CA_CERT_FILE"); val != "" {
+		c.TLS.CACertFile = val
 	}
 	
 	// CORS configuration

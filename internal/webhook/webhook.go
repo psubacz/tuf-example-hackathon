@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"tuf-golang-project/internal/utils"
 )
 
 // EventType represents the type of webhook event
@@ -85,22 +86,33 @@ type Config struct {
 	BufferSize     int
 	EventRetention time.Duration
 	DefaultRetry   *RetryConfig
+	CACertFile     string // Path to CA certificate file for HTTPS requests
 }
 
 // NewManager creates a new webhook manager
 func NewManager(config *Config, store EventStore) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	
+	// Create HTTP client with optional custom CA certificate
+	clientConfig := utils.HTTPClientConfig{
+		CACertFile: config.CACertFile,
+	}
+	httpClient, err := utils.CreateHTTPClient(clientConfig, 30*time.Second)
+	if err != nil {
+		// Fall back to default client if custom configuration fails
+		httpClient = &http.Client{
+			Timeout: 30 * time.Second,
+		}
+	}
+	
 	m := &Manager{
 		endpoints: make(map[string]*WebhookEndpoint),
 		events:    make(chan *Event, config.BufferSize),
 		store:     store,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		workers: config.Workers,
-		ctx:     ctx,
-		cancel:  cancel,
+		client:    httpClient,
+		workers:   config.Workers,
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 
 	// Start workers

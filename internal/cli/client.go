@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	
+	"tuf-golang-project/internal/utils"
 )
 
 // Client represents an HTTP client for the TUF server
@@ -21,12 +23,21 @@ type Client struct {
 
 // NewClient creates a new TUF server client
 func NewClient(config *Config) *Client {
-	return &Client{
-		config:  config,
-		baseURL: config.ServerURL,
-		httpClient: &http.Client{
+	clientConfig := utils.HTTPClientConfig{
+		CACertFile: config.CACertFile,
+	}
+	httpClient, err := utils.CreateHTTPClient(clientConfig, 30*time.Second)
+	if err != nil {
+		// Fall back to default client if custom configuration fails
+		httpClient = &http.Client{
 			Timeout: 30 * time.Second,
-		},
+		}
+	}
+	
+	return &Client{
+		config:     config,
+		baseURL:    config.ServerURL,
+		httpClient: httpClient,
 	}
 }
 
