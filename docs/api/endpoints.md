@@ -13,7 +13,35 @@ https://your-domain.com  (production)
 
 ## Authentication
 
-This implementation does not require authentication for read-only access to public TUF repositories. In production, consider implementing authentication for administrative endpoints.
+This implementation has **authentication enabled by default** for administrative operations. Public TUF metadata and target files remain accessible without authentication.
+
+### Default Credentials (Change in Production!)
+
+**Admin User:**
+- Username: `admin`
+- Password: `changeme`
+
+**API Key:**
+- Key: `admin-key-example`
+- Description: "Default admin API key - change in production"
+
+### Authentication Methods
+
+**API Key (Recommended for services):**
+```bash
+curl -H "X-API-Key: admin-key-example" http://localhost:8080/admin/stats
+```
+
+**JWT Token (For interactive use):**
+```bash
+# Login to get JWT token
+curl -X POST http://localhost:8080/admin/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "changeme"}'
+
+# Use JWT token
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8080/admin/stats
+```
 
 ## Content Types
 
@@ -64,7 +92,24 @@ tuf_requests_total{method="GET",endpoint="/metadata/root.json",status="200"} 150
 tuf_request_duration_seconds_bucket{method="GET",endpoint="/metadata/root.json",le="0.1"} 120
 ```
 
-#### GET /info
+#### GET /api/v1/status
+
+Returns current server status and operational state.
+
+**Response Example:**
+```json
+{
+  "status": "operational",
+  "timestamp": "2025-08-16T19:40:57-04:00",
+  "request_id": "req-12345"
+}
+```
+
+**Response Codes:**
+- `200`: Server is operational
+- `503`: Server is experiencing issues
+
+#### GET /api/v1/info
 
 Returns detailed repository information and configuration.
 
@@ -352,11 +397,178 @@ The server does not support WebDAV methods (PUT, DELETE, PROPFIND, etc.) for sec
 
 ## Client Integration Examples
 
+## Administrative Endpoints (Authentication Required)
+
+All administrative endpoints require authentication using either API keys or JWT tokens.
+
+### Authentication Management
+
+#### POST /admin/auth/login
+
+Login with username/password to receive a JWT token.
+
+**Request:**
+```json
+{
+  "username": "admin",
+  "password": "changeme"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "user": {
+    "username": "admin",
+    "role": "admin",
+    "permissions": ["*"]
+  }
+}
+```
+
+#### POST /admin/auth/generate-api-key
+
+Generate a new API key (requires existing authentication).
+
+**Request:**
+```json
+{
+  "name": "CI System",
+  "role": "admin",
+  "permissions": ["*"],
+  "expires_in": "30d"
+}
+```
+
+#### GET /admin/auth/verify
+
+Verify current authentication status.
+
+### Repository Management
+
+#### POST /admin/repositories/
+
+Create a new repository namespace.
+
+**Request:**
+```json
+{
+  "namespace": "production",
+  "name": "firmware",
+  "description": "Production firmware repository",
+  "config": {
+    "public": false,
+    "max_file_size": 104857600
+  }
+}
+```
+
+#### GET /admin/repositories/
+
+List all repositories (admin view).
+
+#### GET /admin/repositories/{namespace}/{name}
+
+Get detailed repository information.
+
+#### PUT /admin/repositories/{namespace}/{name}
+
+Update repository configuration.
+
+#### DELETE /admin/repositories/{namespace}/{name}
+
+Delete a repository and all its contents.
+
+### Webhook Management
+
+#### POST /admin/webhooks/
+
+Create a webhook endpoint.
+
+**Request:**
+```json
+{
+  "url": "https://your-service.com/webhook",
+  "secret": "webhook-secret",
+  "events": ["file.added", "file.updated"],
+  "retry_config": {
+    "max_attempts": 3,
+    "initial_wait": "1s"
+  }
+}
+```
+
+#### GET /admin/webhooks/
+
+List all webhook endpoints.
+
+#### GET /admin/webhooks/{id}
+
+Get webhook details.
+
+#### PUT /admin/webhooks/{id}
+
+Update webhook configuration.
+
+#### DELETE /admin/webhooks/{id}
+
+Delete webhook endpoint.
+
+#### POST /admin/webhooks/{id}/test
+
+Test webhook delivery.
+
+### Target File Management
+
+#### POST /admin/targets/add
+
+Upload a new target file.
+
+**Request:** Multipart form data
+- `file`: File to upload
+- `path`: Target path (optional)
+
+#### POST /admin/targets/remove
+
+Remove a target file.
+
+**Request:**
+```json
+{
+  "path": "path/to/file.txt"
+}
+```
+
+### System Administration
+
+#### GET /admin/stats
+
+Get system statistics including cache, uptime, and performance metrics.
+
+#### GET /admin/stats/circuit-breakers
+
+Get circuit breaker status and statistics.
+
+#### GET /admin/stats/coalescing
+
+Get request coalescing statistics.
+
+#### GET /admin/audit/logs
+
+View audit logs for administrative actions.
+
 ### curl Examples
+
+#### Public Endpoints (No Authentication Required)
 
 ```bash
 # Get server health
 curl -s http://localhost:8080/health | jq
+
+# Get server status
+curl -s http://localhost:8080/api/v1/status | jq
 
 # Download root metadata
 curl -s http://localhost:8080/metadata/root.json | jq
@@ -369,6 +581,41 @@ curl -O http://localhost:8080/targets/sample.txt
 
 # Get server metrics
 curl -s http://localhost:8080/metrics
+```
+
+#### Administrative Examples (With Default API Key)
+
+```bash
+# Get server statistics
+curl -s -H "X-API-Key: admin-key-example" \
+  http://localhost:8080/admin/stats | jq
+
+# Login to get JWT token
+JWT_TOKEN=$(curl -s -X POST http://localhost:8080/admin/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "changeme"}' | jq -r '.token')
+
+# Use JWT token for admin operations
+curl -s -H "Authorization: Bearer $JWT_TOKEN" \
+  http://localhost:8080/admin/stats | jq
+
+# Upload a file using API key
+curl -X POST \
+  -H "X-API-Key: admin-key-example" \
+  -F "file=@myfile.txt" \
+  -F "path=uploads/myfile.txt" \
+  http://localhost:8080/admin/targets/add
+
+# Create a webhook
+curl -X POST \
+  -H "X-API-Key: admin-key-example" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-webhook.com/tuf-events",
+    "secret": "your-webhook-secret",
+    "events": ["file.added", "file.updated"]
+  }' \
+  http://localhost:8080/admin/webhooks/
 ```
 
 ### go-tuf v2 Client

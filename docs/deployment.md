@@ -42,6 +42,10 @@ export TUF_REPOSITORY_PATH=./tuf-repository-v2
 export TUF_LOG_LEVEL=info
 export TUF_METRICS_ENABLED=true
 
+# Authentication Configuration (enabled by default)
+export TUF_AUTH_ENABLED=true
+export TUF_AUTH_JWT_SECRET=your-production-secret-key
+
 # TLS Configuration (optional)
 export TUF_TLS_ENABLED=false
 export TUF_TLS_CERT_FILE=/path/to/cert.pem
@@ -595,7 +599,7 @@ tail -f /var/log/tuf-server.log | grep "slow request"
 curl -f http://localhost:8080/health
 
 # Repository verification
-curl -s http://localhost:8080/info | jq '.repository'
+curl -s http://localhost:8080/api/v1/info | jq '.repository'
 
 # Metrics check
 curl -s http://localhost:8080/metrics | grep tuf_requests_total
