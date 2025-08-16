@@ -17,7 +17,7 @@ import (
 // CLI represents the command line interface
 type CLI struct {
 	config *Config
-	server *Server
+	server *GinServer
 }
 
 // NewCLI creates a new CLI instance
@@ -40,7 +40,7 @@ func (cli *CLI) Run(args []string) error {
 	cli.config = config
 
 	// Create and start server
-	cli.server = New(config)
+	cli.server = NewGinServer(config)
 
 	// Setup graceful shutdown
 	return cli.runWithGracefulShutdown()
@@ -198,11 +198,10 @@ func (cli *CLI) gracefulShutdown(ctx context.Context) error {
 	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Stop the server
-	if err := cli.server.Stop(shutdownCtx); err != nil {
-		logger.Logger.Error("Shutdown error", "error", err)
-		return err
-	}
+	// For Gin server, we handle shutdown differently since it has built-in graceful shutdown
+	// The handleShutdown goroutine in server_gin.go will handle this
+	// Just wait for the context to be done
+	<-shutdownCtx.Done()
 
 	logger.Logger.Info("Server stopped gracefully")
 	return nil
