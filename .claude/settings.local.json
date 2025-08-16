@@ -8,7 +8,9 @@
       "Bash(go build:*)",
       "Bash(go doc:*)",
       "Bash(kubectl logs:*)",
-      "Bash(skaffold dev:*)"
+      "Bash(skaffold dev:*)",
+      "Bash(cat:*)",
+      "Bash(./tuf-server:*)"
     ],
     "deny": [],
     "ask": []

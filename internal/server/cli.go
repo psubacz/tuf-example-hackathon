@@ -56,6 +56,14 @@ func (cli *CLI) Run(args []string) error {
 
 // parseArgs parses command line arguments
 func (cli *CLI) parseArgs(args []string) error {
+	logger.Logger.Info("parseArgs called", "args", args)
+	
+	// Skip "server" command if present
+	if len(args) > 1 && args[1] == "server" {
+		args = append(args[:1], args[2:]...)
+		logger.Logger.Info("Removed 'server' from args", "newArgs", args)
+	}
+	
 	fs := flag.NewFlagSet("tuf-server", flag.ContinueOnError)
 	fs.Usage = cli.printUsage
 
@@ -64,6 +72,7 @@ func (cli *CLI) parseArgs(args []string) error {
 		host          = fs.String("host", "0.0.0.0", "Server host")
 		repo          = fs.String("repo", "./tuf-repository", "Repository path (supports both demo and go-tuf v2 formats)")
 		config        = fs.String("config", "", "Configuration file path")
+		configShort   = fs.String("c", "", "Configuration file path (short form)")
 		logLevel      = fs.String("log-level", "info", "Log level (debug, info, warn, error)")
 		enableTLS     = fs.Bool("tls", false, "Enable HTTPS/TLS")
 		certFile      = fs.String("cert", "", "TLS certificate file")
@@ -76,9 +85,13 @@ func (cli *CLI) parseArgs(args []string) error {
 		help          = fs.Bool("help", false, "Show help message")
 	)
 
+	logger.Logger.Info("About to parse flags", "args[1:]", args[1:])
 	if err := fs.Parse(args[1:]); err != nil {
+		logger.Logger.Error("Flag parse error", "error", err)
 		return err
 	}
+	
+	logger.Logger.Info("Flags parsed", "config", *config, "port", *port)
 
 	// Handle special flags
 	if *version {
@@ -104,23 +117,30 @@ func (cli *CLI) parseArgs(args []string) error {
 	
 	logger.Logger.Info("Running server mode")
 
-	// Set default config with command line overrides
-	cli.config = DefaultConfig()
-	cli.config.Port = *port
-	cli.config.Host = *host
-	cli.config.RepositoryPath = *repo
-	cli.config.LogLevel = *logLevel
-	cli.config.TLS.Enabled = *enableTLS
-	cli.config.TLS.CertFile = *certFile
-	cli.config.TLS.KeyFile = *keyFile
-	cli.config.Metrics.Enabled = *enableMetrics
-	cli.config.CORS.Enabled = *enableCORS
-	cli.config.RateLimit.Requests = *rateLimit
-
-	// Store config file path for later loading
-	if *config != "" {
-		// Will be loaded in loadConfig()
-		os.Setenv("TUF_CONFIG_FILE", *config)
+	// Store config file path for later loading (check both long and short form)
+	configFile := *config
+	if configFile == "" && *configShort != "" {
+		configFile = *configShort
+	}
+	
+	if configFile != "" {
+		logger.Logger.Info("Setting TUF_CONFIG_FILE", "config", configFile)
+		os.Setenv("TUF_CONFIG_FILE", configFile)
+		// Don't set cli.config when using a config file
+		cli.config = nil
+	} else {
+		// Only set command line defaults if no config file provided
+		cli.config = DefaultConfig()
+		cli.config.Port = *port
+		cli.config.Host = *host
+		cli.config.RepositoryPath = *repo
+		cli.config.LogLevel = *logLevel
+		cli.config.TLS.Enabled = *enableTLS
+		cli.config.TLS.CertFile = *certFile
+		cli.config.TLS.KeyFile = *keyFile
+		cli.config.Metrics.Enabled = *enableMetrics
+		cli.config.CORS.Enabled = *enableCORS
+		cli.config.RateLimit.Requests = *rateLimit
 	}
 
 	return nil
@@ -129,6 +149,7 @@ func (cli *CLI) parseArgs(args []string) error {
 // loadConfig loads configuration from file and environment
 func (cli *CLI) loadConfig() (*Config, error) {
 	configFile := os.Getenv("TUF_CONFIG_FILE")
+	logger.Logger.Info("Loading config", "configFile", configFile)
 
 	config, err := LoadConfig(configFile)
 	if err != nil {

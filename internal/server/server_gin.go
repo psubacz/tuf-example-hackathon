@@ -18,25 +18,32 @@ import (
 
 	"tuf-golang-project/internal/auth"
 	"tuf-golang-project/internal/cache"
+	"tuf-golang-project/internal/circuitbreaker"
 	"tuf-golang-project/internal/logger"
 	"tuf-golang-project/internal/merkle"
 	"tuf-golang-project/internal/middleware"
 	"tuf-golang-project/internal/storage"
+	"tuf-golang-project/internal/tracing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
 // GinServer represents the TUF repository server using Gin framework
 type GinServer struct {
-	config      *Config
-	router      *gin.Engine
-	server      *http.Server
-	logger      *slog.Logger
-	cache       *cache.MetadataCache
-	authManager *auth.AuthManager
-	storage     storage.Backend
-	shutdown    chan struct{}
+	config          *Config
+	router          *gin.Engine
+	server          *http.Server
+	logger          *slog.Logger
+	cache           *cache.MetadataCache
+	authManager     *auth.AuthManager
+	storage         storage.Backend
+	tracerProvider  *tracing.TracerProvider
+	coalescer       *middleware.RequestCoalescer
+	circuitBreakers *circuitbreaker.Manager
+	startTime       time.Time
+	shutdown        chan struct{}
 }
 
 // NewGinServer creates a new TUF server instance using Gin
@@ -103,14 +110,62 @@ func NewGinServer(config *Config) *GinServer {
 		})
 	}
 	
+	// Initialize OpenTelemetry tracing
+	var tracerProvider *tracing.TracerProvider
+	if config.Tracing.Enabled {
+		tracingConfig := &tracing.Config{
+			Enabled:      config.Tracing.Enabled,
+			ServiceName:  config.Tracing.ServiceName,
+			Endpoint:     config.Tracing.Endpoint,
+			SamplingRate: config.Tracing.SamplingRate,
+			Insecure:     config.Tracing.Insecure,
+			Headers:      config.Tracing.Headers,
+		}
+		
+		tracerProvider, err = tracing.NewTracerProvider(tracingConfig)
+		if err != nil {
+			logger.Logger.Error("Failed to initialize tracing", "error", err)
+		}
+	}
+	
+	// Initialize request coalescer
+	var coalescer *middleware.RequestCoalescer
+	if config.Coalescing.Enabled {
+		coalescer = middleware.NewRequestCoalescer(config.Coalescing.TTL, config.Coalescing.MaxWait)
+	}
+	
+	// Initialize circuit breaker manager
+	circuitBreakers := circuitbreaker.NewManager()
+	if config.CircuitBreaker.Enabled {
+		// Register circuit breakers for critical paths
+		circuitBreakers.Register("storage", &circuitbreaker.Config{
+			Name:        "storage",
+			MaxRequests: config.CircuitBreaker.MaxRequests,
+			Interval:    config.CircuitBreaker.Interval,
+			Timeout:     config.CircuitBreaker.Timeout,
+			Threshold:   config.CircuitBreaker.Threshold,
+			MinRequests: config.CircuitBreaker.MinRequests,
+			OnStateChange: func(name string, from, to circuitbreaker.State) {
+				logger.Logger.Info("Circuit breaker state changed",
+					"name", name,
+					"from", from.String(),
+					"to", to.String())
+			},
+		})
+	}
+	
 	s := &GinServer{
-		config:      config,
-		router:      router,
-		logger:      logger.Logger,
-		cache:       cache.NewMetadataCache(),
-		authManager: authManager,
-		storage:     storageBackend,
-		shutdown:    make(chan struct{}),
+		config:          config,
+		router:          router,
+		logger:          logger.Logger,
+		cache:           cache.NewMetadataCache(),
+		authManager:     authManager,
+		storage:         storageBackend,
+		tracerProvider:  tracerProvider,
+		coalescer:       coalescer,
+		circuitBreakers: circuitBreakers,
+		startTime:       time.Now(),
+		shutdown:        make(chan struct{}),
 	}
 
 	s.setupMiddleware()
@@ -122,11 +177,26 @@ func NewGinServer(config *Config) *GinServer {
 
 // setupMiddleware configures the middleware stack
 func (s *GinServer) setupMiddleware() {
+	// OpenTelemetry tracing middleware (should be first)
+	if s.config.Tracing.Enabled && s.tracerProvider != nil {
+		s.router.Use(otelgin.Middleware(s.config.Tracing.ServiceName))
+	}
+	
 	// Core middleware stack
 	s.router.Use(middleware.Recovery())
 	s.router.Use(middleware.Logger())
 	s.router.Use(middleware.RequestID())
 	s.router.Use(middleware.Metrics())
+	
+	// Request coalescing middleware (for GET requests)
+	if s.config.Coalescing.Enabled && s.coalescer != nil {
+		s.router.Use(s.coalescer.Middleware())
+	}
+	
+	// Circuit breaker middleware for storage operations
+	if s.config.CircuitBreaker.Enabled {
+		s.router.Use(s.circuitBreakers.Middleware("storage"))
+	}
 	
 	// Request limits and controls
 	s.router.Use(middleware.RequestBodyLimitByEndpoint())
@@ -210,6 +280,11 @@ func (s *GinServer) setupRoutes() {
 		admin.POST("/auth/login", s.loginHandler)
 		admin.POST("/auth/generate-api-key", s.generateAPIKeyHandler)
 		admin.GET("/auth/verify", s.verifyAuthHandler)
+		
+		// System stats endpoints
+		admin.GET("/stats", s.statsHandler)
+		admin.GET("/stats/circuit-breakers", s.circuitBreakerStatsHandler)
+		admin.GET("/stats/coalescing", s.coalescingStatsHandler)
 	}
 
 	// Root endpoint
@@ -270,6 +345,20 @@ func (s *GinServer) handleShutdown() {
 
 	if err := s.server.Shutdown(ctx); err != nil {
 		s.logger.Error("Server forced to shutdown", "error", err)
+	}
+	
+	// Cleanup tracing provider
+	if s.tracerProvider != nil {
+		if err := s.tracerProvider.Shutdown(ctx); err != nil {
+			s.logger.Error("Failed to shutdown tracer provider", "error", err)
+		}
+	}
+	
+	// Cleanup storage backend
+	if s.storage != nil {
+		if err := s.storage.Close(); err != nil {
+			s.logger.Error("Failed to close storage backend", "error", err)
+		}
 	}
 
 	close(s.shutdown)
@@ -1551,5 +1640,56 @@ func (s *GinServer) getMerkleTree(filePath string) (*merkle.Tree, error) {
 	// s.cache.SetRaw(cacheKey, serializedTree, "application/json", 1*time.Hour)
 	
 	return tree, nil
+}
+
+// statsHandler returns overall system statistics
+func (s *GinServer) statsHandler(c *gin.Context) {
+	stats := gin.H{
+		"cache": s.cache.GetStats(),
+		"server": gin.H{
+			"uptime":        time.Since(s.startTime).String(),
+			"port":          s.config.Port,
+			"repository":    s.config.RepositoryPath,
+			"tracing":       s.config.Tracing.Enabled,
+			"coalescing":    s.config.Coalescing.Enabled,
+			"circuit_breaker": s.config.CircuitBreaker.Enabled,
+		},
+	}
+	
+	// Add circuit breaker stats if enabled
+	if s.config.CircuitBreaker.Enabled && s.circuitBreakers != nil {
+		stats["circuit_breakers"] = s.circuitBreakers.GetStats()
+	}
+	
+	// Add coalescing stats if enabled
+	if s.config.Coalescing.Enabled && s.coalescer != nil {
+		stats["coalescing"] = s.coalescer.Stats()
+	}
+	
+	c.JSON(http.StatusOK, stats)
+}
+
+// circuitBreakerStatsHandler returns circuit breaker statistics
+func (s *GinServer) circuitBreakerStatsHandler(c *gin.Context) {
+	if !s.config.CircuitBreaker.Enabled || s.circuitBreakers == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Circuit breaker not enabled",
+		})
+		return
+	}
+	
+	c.JSON(http.StatusOK, s.circuitBreakers.GetStats())
+}
+
+// coalescingStatsHandler returns request coalescing statistics
+func (s *GinServer) coalescingStatsHandler(c *gin.Context) {
+	if !s.config.Coalescing.Enabled || s.coalescer == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Request coalescing not enabled",
+		})
+		return
+	}
+	
+	c.JSON(http.StatusOK, s.coalescer.Stats())
 }
 

@@ -1,0 +1,72 @@
+{
+  "port": 8086,
+  "repository_path": "./tuf-repository",
+  "log_level": "debug",
+  "log_format": "text",
+  "storage": {
+    "type": "filesystem",
+    "properties": {
+      "base_path": "./tuf-repository"
+    }
+  },
+  "tracing": {
+    "enabled": false,
+    "service_name": "tuf-server",
+    "endpoint": "localhost:4318",
+    "sampling_rate": 0.1,
+    "insecure": true,
+    "headers": {}
+  },
+  "coalescing": {
+    "enabled": true,
+    "ttl": "5s",
+    "max_wait": "30s"
+  },
+  "circuit_breaker": {
+    "enabled": true,
+    "max_requests": 3,
+    "interval": "60s",
+    "timeout": "30s",
+    "threshold": 0.5,
+    "min_requests": 5
+  },
+  "auth": {
+    "enabled": true,
+    "jwt_secret": "advanced-secret-key-change-this",
+    "jwt_expiration": "24h",
+    "api_keys": {
+      "test-api-key": "Test API Key"
+    },
+    "admin_users": [
+      {
+        "username": "admin",
+        "password": "admin123",
+        "role": "admin",
+        "permissions": ["*"]
+      }
+    ]
+  },
+  "cache": {
+    "enabled": true,
+    "ttl": "5m",
+    "max_size": 100,
+    "cleanup_freq": "10m"
+  },
+  "rate_limit": {
+    "enabled": true,
+    "requests": 1000,
+    "window": "1h",
+    "burst_size": 100
+  },
+  "cors": {
+    "enabled": true,
+    "allowed_origins": ["*"],
+    "allowed_methods": ["GET", "POST", "OPTIONS"],
+    "allowed_headers": ["Content-Type", "Authorization"],
+    "max_age": 3600
+  },
+  "metrics": {
+    "enabled": true,
+    "path": "/metrics"
+  }
+}

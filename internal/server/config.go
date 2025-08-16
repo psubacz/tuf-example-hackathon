@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	
+	"tuf-golang-project/internal/logger"
 )
 
 // Config holds server configuration
@@ -44,6 +46,15 @@ type Config struct {
 	
 	// Storage backend
 	Storage StorageConfig `json:"storage"`
+	
+	// OpenTelemetry tracing
+	Tracing TracingConfig `json:"tracing"`
+	
+	// Request coalescing
+	Coalescing CoalescingConfig `json:"coalescing"`
+	
+	// Circuit breaker
+	CircuitBreaker CircuitBreakerConfig `json:"circuit_breaker"`
 }
 
 // StorageConfig holds storage backend configuration
@@ -120,6 +131,33 @@ type MetricsConfig struct {
 	Path    string `json:"path"`
 }
 
+// TracingConfig holds OpenTelemetry tracing configuration
+type TracingConfig struct {
+	Enabled      bool              `json:"enabled"`
+	ServiceName  string            `json:"service_name"`
+	Endpoint     string            `json:"endpoint"`
+	SamplingRate float64           `json:"sampling_rate"`
+	Insecure     bool              `json:"insecure"`
+	Headers      map[string]string `json:"headers"`
+}
+
+// CoalescingConfig holds request coalescing configuration
+type CoalescingConfig struct {
+	Enabled bool          `json:"enabled"`
+	TTL     time.Duration `json:"ttl"`
+	MaxWait time.Duration `json:"max_wait"`
+}
+
+// CircuitBreakerConfig holds circuit breaker configuration
+type CircuitBreakerConfig struct {
+	Enabled     bool          `json:"enabled"`
+	MaxRequests uint32        `json:"max_requests"`
+	Interval    time.Duration `json:"interval"`
+	Timeout     time.Duration `json:"timeout"`
+	Threshold   float64       `json:"threshold"`
+	MinRequests uint32        `json:"min_requests"`
+}
+
 // DefaultConfig returns default server configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -183,12 +221,38 @@ func DefaultConfig() *Config {
 				"base_path": "./tuf-repository",
 			},
 		},
+		
+		Tracing: TracingConfig{
+			Enabled:      false,
+			ServiceName:  "tuf-server",
+			Endpoint:     "localhost:4318",
+			SamplingRate: 0.1,
+			Insecure:     true,
+			Headers:      make(map[string]string),
+		},
+		
+		Coalescing: CoalescingConfig{
+			Enabled: false,
+			TTL:     5 * time.Second,
+			MaxWait: 30 * time.Second,
+		},
+		
+		CircuitBreaker: CircuitBreakerConfig{
+			Enabled:     false,
+			MaxRequests: 3,
+			Interval:    60 * time.Second,
+			Timeout:     30 * time.Second,
+			Threshold:   0.5,
+			MinRequests: 5,
+		},
 	}
 }
 
 // LoadConfig loads configuration from file or environment variables
 func LoadConfig(configFile string) (*Config, error) {
 	config := DefaultConfig()
+	
+	logger.Logger.Debug("LoadConfig called", "configFile", configFile)
 	
 	// Load from file if provided
 	if configFile != "" {
@@ -210,10 +274,12 @@ func LoadConfig(configFile string) (*Config, error) {
 
 // loadFromFile loads configuration from JSON file
 func (c *Config) loadFromFile(filename string) error {
+	logger.Logger.Debug("Loading config from file", "filename", filename)
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return err
 	}
+	logger.Logger.Debug("Config file read", "size", len(data))
 	
 	// First unmarshal into a temporary structure with string durations
 	var temp struct {
@@ -248,11 +314,42 @@ func (c *Config) loadFromFile(filename string) error {
 		} `json:"cache"`
 		
 		Metrics MetricsConfig `json:"metrics"`
+		Auth    AuthConfig    `json:"auth"`
+		Storage StorageConfig `json:"storage"`
+		
+		Tracing struct {
+			Enabled      bool              `json:"enabled"`
+			ServiceName  string            `json:"service_name"`
+			Endpoint     string            `json:"endpoint"`
+			SamplingRate float64           `json:"sampling_rate"`
+			Insecure     bool              `json:"insecure"`
+			Headers      map[string]string `json:"headers"`
+		} `json:"tracing"`
+		
+		Coalescing struct {
+			Enabled bool   `json:"enabled"`
+			TTL     string `json:"ttl"`
+			MaxWait string `json:"max_wait"`
+		} `json:"coalescing"`
+		
+		CircuitBreaker struct {
+			Enabled     bool    `json:"enabled"`
+			MaxRequests uint32  `json:"max_requests"`
+			Interval    string  `json:"interval"`
+			Timeout     string  `json:"timeout"`
+			Threshold   float64 `json:"threshold"`
+			MinRequests uint32  `json:"min_requests"`
+		} `json:"circuit_breaker"`
 	}
 	
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return err
 	}
+	
+	logger.Logger.Info("JSON unmarshaled", 
+		"auth_enabled", temp.Auth.Enabled,
+		"coalescing_enabled", temp.Coalescing.Enabled,
+		"circuit_breaker_enabled", temp.CircuitBreaker.Enabled)
 	
 	// Copy simple fields
 	c.Port = temp.Port
@@ -267,6 +364,8 @@ func (c *Config) loadFromFile(filename string) error {
 	c.CORS = temp.CORS
 	c.Compression = temp.Compression
 	c.Metrics = temp.Metrics
+	c.Auth = temp.Auth
+	c.Storage = temp.Storage
 	
 	// Parse duration strings
 	c.RateLimit.Enabled = temp.RateLimit.Enabled
@@ -299,6 +398,60 @@ func (c *Config) loadFromFile(filename string) error {
 			c.Cache.CleanupFreq = d
 		} else {
 			return fmt.Errorf("invalid cache cleanup frequency duration: %s", temp.Cache.CleanupFreq)
+		}
+	}
+	
+	// Parse tracing configuration
+	c.Tracing.Enabled = temp.Tracing.Enabled
+	c.Tracing.ServiceName = temp.Tracing.ServiceName
+	c.Tracing.Endpoint = temp.Tracing.Endpoint
+	c.Tracing.SamplingRate = temp.Tracing.SamplingRate
+	c.Tracing.Insecure = temp.Tracing.Insecure
+	if temp.Tracing.Headers != nil {
+		c.Tracing.Headers = temp.Tracing.Headers
+	}
+	
+	// Parse coalescing configuration
+	c.Coalescing.Enabled = temp.Coalescing.Enabled
+	if temp.Coalescing.TTL != "" {
+		if d, err := time.ParseDuration(temp.Coalescing.TTL); err == nil {
+			c.Coalescing.TTL = d
+		} else {
+			return fmt.Errorf("invalid coalescing TTL duration: %s", temp.Coalescing.TTL)
+		}
+	}
+	if temp.Coalescing.MaxWait != "" {
+		if d, err := time.ParseDuration(temp.Coalescing.MaxWait); err == nil {
+			c.Coalescing.MaxWait = d
+		} else {
+			return fmt.Errorf("invalid coalescing max wait duration: %s", temp.Coalescing.MaxWait)
+		}
+	}
+	
+	// Parse circuit breaker configuration
+	c.CircuitBreaker.Enabled = temp.CircuitBreaker.Enabled
+	c.CircuitBreaker.MaxRequests = temp.CircuitBreaker.MaxRequests
+	c.CircuitBreaker.Threshold = temp.CircuitBreaker.Threshold
+	c.CircuitBreaker.MinRequests = temp.CircuitBreaker.MinRequests
+	
+	// Debug logging
+	logger.Logger.Debug("Config file parsed",
+		"auth_enabled", c.Auth.Enabled,
+		"coalescing_enabled", c.Coalescing.Enabled,
+		"circuit_breaker_enabled", c.CircuitBreaker.Enabled)
+	
+	if temp.CircuitBreaker.Interval != "" {
+		if d, err := time.ParseDuration(temp.CircuitBreaker.Interval); err == nil {
+			c.CircuitBreaker.Interval = d
+		} else {
+			return fmt.Errorf("invalid circuit breaker interval duration: %s", temp.CircuitBreaker.Interval)
+		}
+	}
+	if temp.CircuitBreaker.Timeout != "" {
+		if d, err := time.ParseDuration(temp.CircuitBreaker.Timeout); err == nil {
+			c.CircuitBreaker.Timeout = d
+		} else {
+			return fmt.Errorf("invalid circuit breaker timeout duration: %s", temp.CircuitBreaker.Timeout)
 		}
 	}
 	
