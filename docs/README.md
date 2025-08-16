@@ -20,6 +20,10 @@ This directory contains comprehensive documentation for the TUF (The Update Fram
 
 - **[Endpoints Reference](api/endpoints.md)**: Complete REST API documentation with examples, error codes, and security features
 
+### Multi-Repository Support
+
+- **[Multi-Repository Guide](multi-repository-guide.md)**: Complete guide for managing multiple TUF repositories with namespace-based isolation, including setup, API usage, and client configuration
+
 ### Deployment Guides
 
 - **[Deployment Guide](deployment.md)**: Comprehensive deployment documentation covering local development, containerization, Kubernetes, and production considerations

@@ -359,6 +359,8 @@ curl -X POST http://tuf-server/api/v1/admin/repositories \
   }'
 ```
 
+📖 **[Complete Multi-Repository Guide](./docs/multi-repository-guide.md)** - Learn how to create, manage, and use multiple repositories with namespace-based isolation.
+
 ## 🔐 Security Features
 
 ### Authentication Methods

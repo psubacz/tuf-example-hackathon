@@ -1702,6 +1702,42 @@ func (s *GinServer) getMerkleTree(filePath string) (*merkle.Tree, error) {
 	return tree, nil
 }
 
+// getContentTypeByExt returns content type for file extension
+func getContentTypeByExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".json":
+		return "application/json"
+	case ".txt", ".md":
+		return "text/plain"
+	case ".csv":
+		return "text/csv"
+	case ".xml":
+		return "application/xml"
+	case ".html", ".htm":
+		return "text/html"
+	case ".css":
+		return "text/css"
+	case ".js":
+		return "application/javascript"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".svg":
+		return "image/svg+xml"
+	case ".pdf":
+		return "application/pdf"
+	case ".zip":
+		return "application/zip"
+	case ".tar", ".tar.gz", ".tgz":
+		return "application/tar+gzip"
+	default:
+		return "application/octet-stream"
+	}
+}
+
 // statsHandler returns overall system statistics
 func (s *GinServer) statsHandler(c *gin.Context) {
 	stats := gin.H{
