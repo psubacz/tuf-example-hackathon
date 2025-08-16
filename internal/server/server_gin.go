@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"tuf-golang-project/internal/cache"
 	"tuf-golang-project/internal/logger"
 	"tuf-golang-project/internal/middleware"
 
@@ -25,6 +26,7 @@ type GinServer struct {
 	router   *gin.Engine
 	server   *http.Server
 	logger   *slog.Logger
+	cache    *cache.MetadataCache
 	shutdown chan struct{}
 }
 
@@ -43,6 +45,7 @@ func NewGinServer(config *Config) *GinServer {
 		config:   config,
 		router:   router,
 		logger:   logger.Logger,
+		cache:    cache.NewMetadataCache(),
 		shutdown: make(chan struct{}),
 	}
 
@@ -295,11 +298,12 @@ func (s *GinServer) getRepositoryInfo() map[string]interface{} {
 			"tls_enabled": s.config.TLS.Enabled,
 			"gin_version": gin.Version,
 		},
+		"cache": s.cache.GetStats(),
 		"endpoints": map[string]string{
-			"metadata": fmt.Sprintf("/metadata/"),
-			"targets":  fmt.Sprintf("/targets/"),
-			"health":   fmt.Sprintf("/health"),
-			"metrics":  fmt.Sprintf("/metrics"),
+			"metadata": "/metadata/",
+			"targets":  "/targets/",
+			"health":   "/health",
+			"metrics":  "/metrics",
 		},
 		"timestamp": time.Now().Format(time.RFC3339),
 	}
@@ -320,6 +324,40 @@ func (s *GinServer) rootHandler(c *gin.Context) {
 }
 
 func (s *GinServer) rootMetadataHandler(c *gin.Context) {
+	cacheKey := "metadata/root.json"
+	
+	// Check for conditional request headers
+	ifNoneMatch := c.GetHeader("If-None-Match")
+	ifModifiedSince := c.GetHeader("If-Modified-Since")
+	
+	// Try to get from cache first
+	if entry, exists := s.cache.Get(cacheKey); exists {
+		// Handle ETag validation
+		if ifNoneMatch != "" && ifNoneMatch == entry.ETag {
+			c.Status(http.StatusNotModified)
+			return
+		}
+		
+		// Handle If-Modified-Since
+		if ifModifiedSince != "" {
+			sinceTime, err := http.ParseTime(ifModifiedSince)
+			if err == nil && !entry.LastModified.After(sinceTime) {
+				c.Status(http.StatusNotModified)
+				return
+			}
+		}
+		
+		// Serve from cache
+		c.Header("Content-Type", entry.ContentType)
+		c.Header("ETag", entry.ETag)
+		c.Header("Last-Modified", entry.LastModified.UTC().Format(http.TimeFormat))
+		c.Header("Cache-Control", "public, max-age=60")
+		c.Header("X-Cache", "HIT")
+		c.Data(http.StatusOK, entry.ContentType, entry.Content)
+		return
+	}
+	
+	// Not in cache, load from disk
 	filePath := filepath.Join(s.config.RepositoryPath, "metadata", "root.json")
 	
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -331,15 +369,71 @@ func (s *GinServer) rootMetadataHandler(c *gin.Context) {
 		return
 	}
 	
-	// Set caching headers for root metadata (short TTL)
+	// Cache the file
+	if err := s.cache.Set(cacheKey, filePath); err != nil {
+		s.logger.Error("Failed to cache root metadata", "error", err)
+		// If caching fails, just serve the file directly
+		c.Header("Cache-Control", "public, max-age=60")
+		c.Header("Content-Type", "application/json")
+		c.Header("X-Cache", "MISS")
+		c.File(filePath)
+		return
+	}
+	
+	// Get the cached entry to serve it
+	if entry, exists := s.cache.Get(cacheKey); exists {
+		c.Header("Content-Type", entry.ContentType)
+		c.Header("ETag", entry.ETag)
+		c.Header("Last-Modified", entry.LastModified.UTC().Format(http.TimeFormat))
+		c.Header("Cache-Control", "public, max-age=60")
+		c.Header("X-Cache", "MISS") // First time caching, so it's still a miss
+		c.Data(http.StatusOK, entry.ContentType, entry.Content)
+		s.logger.Info("Serving root metadata", "client_ip", c.ClientIP(), "cache", "miss")
+		return
+	}
+	
+	// Fallback - serve file directly if cache fails
 	c.Header("Cache-Control", "public, max-age=60")
 	c.Header("Content-Type", "application/json")
-	
-	s.logger.Info("Serving root metadata", "client_ip", c.ClientIP())
+	c.Header("X-Cache", "MISS")
 	c.File(filePath)
 }
 
 func (s *GinServer) timestampMetadataHandler(c *gin.Context) {
+	cacheKey := "metadata/timestamp.json"
+	
+	// Check for conditional request headers
+	ifNoneMatch := c.GetHeader("If-None-Match")
+	ifModifiedSince := c.GetHeader("If-Modified-Since")
+	
+	// Try to get from cache first
+	if entry, exists := s.cache.Get(cacheKey); exists {
+		// Handle ETag validation
+		if ifNoneMatch != "" && ifNoneMatch == entry.ETag {
+			c.Status(http.StatusNotModified)
+			return
+		}
+		
+		// Handle If-Modified-Since
+		if ifModifiedSince != "" {
+			sinceTime, err := http.ParseTime(ifModifiedSince)
+			if err == nil && !entry.LastModified.After(sinceTime) {
+				c.Status(http.StatusNotModified)
+				return
+			}
+		}
+		
+		// Serve from cache
+		c.Header("Content-Type", entry.ContentType)
+		c.Header("ETag", entry.ETag)
+		c.Header("Last-Modified", entry.LastModified.UTC().Format(http.TimeFormat))
+		c.Header("Cache-Control", "public, max-age=5")
+		c.Header("X-Cache", "HIT")
+		c.Data(http.StatusOK, entry.ContentType, entry.Content)
+		return
+	}
+	
+	// Not in cache, load from disk
 	filePath := filepath.Join(s.config.RepositoryPath, "metadata", "timestamp.json")
 	
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -351,15 +445,71 @@ func (s *GinServer) timestampMetadataHandler(c *gin.Context) {
 		return
 	}
 	
-	// Timestamp should have very short cache (5 seconds) for freshness
+	// Cache the file
+	if err := s.cache.Set(cacheKey, filePath); err != nil {
+		s.logger.Error("Failed to cache timestamp metadata", "error", err)
+		// If caching fails, just serve the file directly
+		c.Header("Cache-Control", "public, max-age=5")
+		c.Header("Content-Type", "application/json")
+		c.Header("X-Cache", "MISS")
+		c.File(filePath)
+		return
+	}
+	
+	// Get the cached entry to serve it
+	if entry, exists := s.cache.Get(cacheKey); exists {
+		c.Header("Content-Type", entry.ContentType)
+		c.Header("ETag", entry.ETag)
+		c.Header("Last-Modified", entry.LastModified.UTC().Format(http.TimeFormat))
+		c.Header("Cache-Control", "public, max-age=5")
+		c.Header("X-Cache", "MISS") // First time caching, so it's still a miss
+		c.Data(http.StatusOK, entry.ContentType, entry.Content)
+		s.logger.Info("Serving timestamp metadata", "client_ip", c.ClientIP(), "cache", "miss")
+		return
+	}
+	
+	// Fallback - serve file directly if cache fails
 	c.Header("Cache-Control", "public, max-age=5")
 	c.Header("Content-Type", "application/json")
-	
-	s.logger.Info("Serving timestamp metadata", "client_ip", c.ClientIP())
+	c.Header("X-Cache", "MISS")
 	c.File(filePath)
 }
 
 func (s *GinServer) snapshotMetadataHandler(c *gin.Context) {
+	cacheKey := "metadata/snapshot.json"
+	
+	// Check for conditional request headers
+	ifNoneMatch := c.GetHeader("If-None-Match")
+	ifModifiedSince := c.GetHeader("If-Modified-Since")
+	
+	// Try to get from cache first
+	if entry, exists := s.cache.Get(cacheKey); exists {
+		// Handle ETag validation
+		if ifNoneMatch != "" && ifNoneMatch == entry.ETag {
+			c.Status(http.StatusNotModified)
+			return
+		}
+		
+		// Handle If-Modified-Since
+		if ifModifiedSince != "" {
+			sinceTime, err := http.ParseTime(ifModifiedSince)
+			if err == nil && !entry.LastModified.After(sinceTime) {
+				c.Status(http.StatusNotModified)
+				return
+			}
+		}
+		
+		// Serve from cache
+		c.Header("Content-Type", entry.ContentType)
+		c.Header("ETag", entry.ETag)
+		c.Header("Last-Modified", entry.LastModified.UTC().Format(http.TimeFormat))
+		c.Header("Cache-Control", "public, max-age=300")
+		c.Header("X-Cache", "HIT")
+		c.Data(http.StatusOK, entry.ContentType, entry.Content)
+		return
+	}
+	
+	// Not in cache, load from disk
 	filePath := filepath.Join(s.config.RepositoryPath, "metadata", "snapshot.json")
 	
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -371,15 +521,71 @@ func (s *GinServer) snapshotMetadataHandler(c *gin.Context) {
 		return
 	}
 	
-	// Snapshot can have moderate cache (5 minutes)
+	// Cache the file
+	if err := s.cache.Set(cacheKey, filePath); err != nil {
+		s.logger.Error("Failed to cache snapshot metadata", "error", err)
+		// If caching fails, just serve the file directly
+		c.Header("Cache-Control", "public, max-age=300")
+		c.Header("Content-Type", "application/json")
+		c.Header("X-Cache", "MISS")
+		c.File(filePath)
+		return
+	}
+	
+	// Get the cached entry to serve it
+	if entry, exists := s.cache.Get(cacheKey); exists {
+		c.Header("Content-Type", entry.ContentType)
+		c.Header("ETag", entry.ETag)
+		c.Header("Last-Modified", entry.LastModified.UTC().Format(http.TimeFormat))
+		c.Header("Cache-Control", "public, max-age=300")
+		c.Header("X-Cache", "MISS") // First time caching, so it's still a miss
+		c.Data(http.StatusOK, entry.ContentType, entry.Content)
+		s.logger.Info("Serving snapshot metadata", "client_ip", c.ClientIP(), "cache", "miss")
+		return
+	}
+	
+	// Fallback - serve file directly if cache fails
 	c.Header("Cache-Control", "public, max-age=300")
 	c.Header("Content-Type", "application/json")
-	
-	s.logger.Info("Serving snapshot metadata", "client_ip", c.ClientIP())
+	c.Header("X-Cache", "MISS")
 	c.File(filePath)
 }
 
 func (s *GinServer) targetsMetadataHandler(c *gin.Context) {
+	cacheKey := "metadata/targets.json"
+	
+	// Check for conditional request headers
+	ifNoneMatch := c.GetHeader("If-None-Match")
+	ifModifiedSince := c.GetHeader("If-Modified-Since")
+	
+	// Try to get from cache first
+	if entry, exists := s.cache.Get(cacheKey); exists {
+		// Handle ETag validation
+		if ifNoneMatch != "" && ifNoneMatch == entry.ETag {
+			c.Status(http.StatusNotModified)
+			return
+		}
+		
+		// Handle If-Modified-Since
+		if ifModifiedSince != "" {
+			sinceTime, err := http.ParseTime(ifModifiedSince)
+			if err == nil && !entry.LastModified.After(sinceTime) {
+				c.Status(http.StatusNotModified)
+				return
+			}
+		}
+		
+		// Serve from cache
+		c.Header("Content-Type", entry.ContentType)
+		c.Header("ETag", entry.ETag)
+		c.Header("Last-Modified", entry.LastModified.UTC().Format(http.TimeFormat))
+		c.Header("Cache-Control", "public, max-age=3600")
+		c.Header("X-Cache", "HIT")
+		c.Data(http.StatusOK, entry.ContentType, entry.Content)
+		return
+	}
+	
+	// Not in cache, load from disk
 	filePath := filepath.Join(s.config.RepositoryPath, "metadata", "targets.json")
 	
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -391,11 +597,33 @@ func (s *GinServer) targetsMetadataHandler(c *gin.Context) {
 		return
 	}
 	
-	// Targets can have longer cache (1 hour)
+	// Cache the file
+	if err := s.cache.Set(cacheKey, filePath); err != nil {
+		s.logger.Error("Failed to cache targets metadata", "error", err)
+		// If caching fails, just serve the file directly
+		c.Header("Cache-Control", "public, max-age=3600")
+		c.Header("Content-Type", "application/json")
+		c.Header("X-Cache", "MISS")
+		c.File(filePath)
+		return
+	}
+	
+	// Get the cached entry to serve it
+	if entry, exists := s.cache.Get(cacheKey); exists {
+		c.Header("Content-Type", entry.ContentType)
+		c.Header("ETag", entry.ETag)
+		c.Header("Last-Modified", entry.LastModified.UTC().Format(http.TimeFormat))
+		c.Header("Cache-Control", "public, max-age=3600")
+		c.Header("X-Cache", "MISS") // First time caching, so it's still a miss
+		c.Data(http.StatusOK, entry.ContentType, entry.Content)
+		s.logger.Info("Serving targets metadata", "client_ip", c.ClientIP(), "cache", "miss")
+		return
+	}
+	
+	// Fallback - serve file directly if cache fails
 	c.Header("Cache-Control", "public, max-age=3600")
 	c.Header("Content-Type", "application/json")
-	
-	s.logger.Info("Serving targets metadata", "client_ip", c.ClientIP())
+	c.Header("X-Cache", "MISS")
 	c.File(filePath)
 }
 
