@@ -22,9 +22,11 @@ import (
 	"tuf-golang-project/internal/logger"
 	"tuf-golang-project/internal/merkle"
 	"tuf-golang-project/internal/middleware"
+	"tuf-golang-project/internal/repository"
 	"tuf-golang-project/internal/retry"
 	"tuf-golang-project/internal/storage"
 	"tuf-golang-project/internal/tracing"
+	"tuf-golang-project/internal/webhook"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -43,6 +45,8 @@ type GinServer struct {
 	tracerProvider  *tracing.TracerProvider
 	coalescer       *middleware.RequestCoalescer
 	circuitBreakers *circuitbreaker.Manager
+	webhookManager  *webhook.Manager
+	repoManager     *repository.Manager
 	startTime       time.Time
 	shutdown        chan struct{}
 }
@@ -170,6 +174,24 @@ func NewGinServer(config *Config) *GinServer {
 		})
 	}
 	
+	// Initialize webhook manager
+	var webhookManager *webhook.Manager
+	webhookConfig := &webhook.Config{
+		Workers:        10,
+		BufferSize:     1000,
+		EventRetention: 24 * time.Hour,
+		DefaultRetry: &webhook.RetryConfig{
+			MaxAttempts: 3,
+			InitialWait: 1 * time.Second,
+			MaxWait:     30 * time.Second,
+		},
+	}
+	webhookStore := webhook.NewMemoryEventStore()
+	webhookManager = webhook.NewManager(webhookConfig, webhookStore)
+	
+	// Initialize repository manager
+	repoManager := repository.NewManager(storageBackend)
+	
 	s := &GinServer{
 		config:          config,
 		router:          router,
@@ -180,6 +202,8 @@ func NewGinServer(config *Config) *GinServer {
 		tracerProvider:  tracerProvider,
 		coalescer:       coalescer,
 		circuitBreakers: circuitBreakers,
+		webhookManager:  webhookManager,
+		repoManager:     repoManager,
 		startTime:       time.Now(),
 		shutdown:        make(chan struct{}),
 	}
@@ -316,6 +340,15 @@ func (s *GinServer) setupRoutes() {
 		admin.GET("/stats/circuit-breakers", s.circuitBreakerStatsHandler)
 		admin.GET("/stats/coalescing", s.coalescingStatsHandler)
 	}
+	
+	// Webhook routes
+	s.setupWebhookRoutes(api)
+	
+	// Repository routes  
+	s.setupRepositoryRoutes(api)
+
+	// Repository middleware for extracting repo from path
+	s.router.Use(s.repositoryMiddleware())
 
 	// Root endpoint
 	s.router.GET("/", s.rootHandler)
