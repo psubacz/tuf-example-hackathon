@@ -30,12 +30,30 @@ spec:
       serviceAccountName: {{ include "tuf-server.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.config.initRepository }}
+      initContainers:
+        - name: init-tuf-repo
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["./tuf-server"]
+          args: ["--init", "--repo", "/shared"]
+          env:
+            - name: TUF_REPOSITORY_PATH
+              value: "{{ .Values.config.repositoryPath }}"
+          volumeMounts:
+            - name: shared-repository
+              mountPath: /shared
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["./tuf-server"]
+          args: ["--init", "--port", "{{ .Values.config.port }}", "--repo", "/shared"]
           ports:
             - name: http
               containerPort: {{ .Values.config.port }}
@@ -47,34 +65,28 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           env:
-            - name: PORT
+            - name: TUF_PORT
               value: {{ .Values.config.port | quote }}
-            - name: REPOSITORY_PATH
-              value: {{ .Values.config.repositoryPath | quote }}
-            - name: LOG_LEVEL
+            - name: TUF_REPOSITORY_PATH
+              value: "{{ .Values.config.repositoryPath }}"
+            - name: TUF_LOG_LEVEL
               value: {{ .Values.config.logLevel | quote }}
-            - name: READ_TIMEOUT
-              value: {{ .Values.config.readTimeout | quote }}
-            - name: WRITE_TIMEOUT
-              value: {{ .Values.config.writeTimeout | quote }}
-            - name: IDLE_TIMEOUT
-              value: {{ .Values.config.idleTimeout | quote }}
-            - name: CORS_ENABLED
+            - name: TUF_CORS_ENABLED
               value: {{ .Values.config.cors.enabled | quote }}
-            - name: TLS_ENABLED
+            - name: TUF_TLS_ENABLED
               value: {{ .Values.config.tls.enabled | quote }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: repository-data
-              mountPath: /app/tuf-repository
+            - name: shared-repository
+              mountPath: /shared
             {{- with .Values.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
-        - name: repository-data
+        - name: shared-repository
           emptyDir: {}
         {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}

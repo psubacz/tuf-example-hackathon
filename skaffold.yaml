@@ -10,6 +10,7 @@ build:
         dockerfile: Dockerfile
         buildArgs:
           GO_VERSION: "1.21"
+        pullParent: false
       sync:
         manual:
           - src: "**/*.go"
@@ -24,9 +25,9 @@ deploy:
         chartPath: charts/tuf-server
         valuesFiles:
           - charts/tuf-server/values.yaml
-        setValues:
-          image.repository: "localhost/tuf_server"
-          image.tag: "fixed"
+        setValueTemplates:
+          image.repository: "{{.IMAGE_REPO_tuf_server}}"
+          image.tag: "{{.IMAGE_TAG_tuf_server}}"
         upgradeOnChange: true
         createNamespace: true
 
@@ -44,7 +45,8 @@ profiles:
           docker:
             dockerfile: Dockerfile
             buildArgs:
-              GO_VERSION: "1.24"
+              GO_VERSION: "1.25"
+            pullParent: false
       local:
         push: false
         useBuildkit: false
@@ -57,9 +59,9 @@ profiles:
             chartPath: charts/tuf-server
             valuesFiles:
               - charts/tuf-server/values.yaml
-            setValues:
-              image.repository: "localhost/tuf_server"
-              image.tag: "fixed"
+            setValueTemplates:
+              image.repository: "{{.IMAGE_REPO_tuf_server}}"
+              image.tag: "{{.IMAGE_TAG_tuf_server}}"
             upgradeOnChange: true
             createNamespace: true
 
@@ -79,9 +81,9 @@ profiles:
             chartPath: charts/tuf-server
             valuesFiles:
               - charts/tuf-server/values.yaml
-            setValues:
-              image.repository: "localhost/tuf_server"
-              image.tag: "fixed"
+            setValueTemplates:
+              image.repository: "{{.IMAGE_REPO_tuf_server}}"
+              image.tag: "{{.IMAGE_TAG_tuf_server}}"
               replicaCount: 1
               resources.requests.cpu: "100m"
               resources.requests.memory: "128Mi"
@@ -103,9 +105,9 @@ profiles:
             chartPath: charts/tuf-server
             valuesFiles:
               - charts/tuf-server/values.yaml
-            setValues:
-              image.repository: "localhost/tuf_server"
-              image.tag: "fixed"
+            setValueTemplates:
+              image.repository: "{{.IMAGE_REPO_tuf_server}}"
+              image.tag: "{{.IMAGE_TAG_tuf_server}}"
               replicaCount: 3
               autoscaling.enabled: true
               ingress.enabled: true

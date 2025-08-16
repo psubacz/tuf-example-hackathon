@@ -2,7 +2,7 @@
 replicaCount: 1
 
 image:
-  repository: tuf-server
+  repository: localhost/tuf_server
   pullPolicy: IfNotPresent
   tag: "latest"
 
@@ -19,16 +19,9 @@ serviceAccount:
 podAnnotations: {}
 podLabels: {}
 
-podSecurityContext:
-  fsGroup: 2000
+podSecurityContext: {}
 
-securityContext:
-  capabilities:
-    drop:
-    - ALL
-  readOnlyRootFilesystem: true
-  runAsNonRoot: true
-  runAsUser: 1000
+securityContext: {}
 
 service:
   type: ClusterIP
@@ -85,8 +78,9 @@ affinity: {}
 # TUF Server Configuration
 config:
   port: 8080
-  repositoryPath: "/app/tuf-repository"
+  repositoryPath: "/shared"
   logLevel: "info"
+  initRepository: false
   readTimeout: 30
   writeTimeout: 30
   idleTimeout: 60

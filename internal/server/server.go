@@ -37,7 +37,7 @@ func New(config *Config) *Server {
 
 	s.setupRoutes()
 	s.setupServer()
-	
+
 	return s
 }
 
@@ -47,13 +47,13 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/health", s.withMiddleware(s.healthHandler))
 	s.mux.HandleFunc("/metrics", s.withMiddleware(s.metricsHandler))
 	s.mux.HandleFunc("/info", s.withMiddleware(s.infoHandler))
-	
+
 	// TUF metadata endpoints
 	s.mux.HandleFunc("/metadata/", s.withMiddleware(s.metadataHandler))
-	
-	// TUF targets endpoints  
+
+	// TUF targets endpoints
 	s.mux.HandleFunc("/targets/", s.withMiddleware(s.targetsHandler))
-	
+
 	// Root endpoint with dashboard
 	s.mux.HandleFunc("/", s.withMiddleware(s.rootHandler))
 }
@@ -78,33 +78,33 @@ func (s *Server) Start() error {
 	}
 
 	s.logger.Info("TUF Repository Server starting")
-	s.logger.Info("Server configuration", 
+	s.logger.Info("Server configuration",
 		"repository", s.config.RepositoryPath,
 		"server", fmt.Sprintf("http://localhost:%d", s.config.Port),
 		"log_level", s.config.LogLevel,
 		"cors_enabled", s.config.CORS.Enabled)
-	
+
 	if s.config.TLS.Enabled {
 		s.logger.Info("TLS enabled", "cert_file", s.config.TLS.CertFile, "key_file", s.config.TLS.KeyFile)
 		return s.server.ListenAndServeTLS(s.config.TLS.CertFile, s.config.TLS.KeyFile)
 	}
-	
+
 	return s.server.ListenAndServe()
 }
 
 // Stop gracefully stops the server
 func (s *Server) Stop(ctx context.Context) error {
 	s.logger.Info("Gracefully shutting down server")
-	
+
 	// Signal shutdown to other goroutines
 	close(s.shutdown)
-	
+
 	// Shutdown HTTP server
 	if err := s.server.Shutdown(ctx); err != nil {
 		s.logger.Error("Server shutdown error", "error", err)
 		return err
 	}
-	
+
 	s.logger.Info("Server stopped successfully")
 	return nil
 }
@@ -127,12 +127,12 @@ func (s *Server) withMiddleware(handler http.HandlerFunc) http.HandlerFunc {
 // healthHandler provides health check endpoint
 func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	health := s.checkHealth()
-	
+
 	status := http.StatusOK
 	if health["status"] != "healthy" {
 		status = http.StatusServiceUnavailable
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(health)
@@ -147,30 +147,30 @@ func (s *Server) checkHealth() map[string]interface{} {
 		"version":   "2.0.0",
 		"uptime":    time.Since(s.metrics.StartTime).String(),
 	}
-	
+
 	// Check repository accessibility
 	if _, err := os.Stat(s.config.RepositoryPath); err != nil {
 		health["status"] = "unhealthy"
 		health["errors"] = []string{fmt.Sprintf("Repository not accessible: %v", err)}
 		return health
 	}
-	
+
 	// Check metadata files
 	metadataDir := filepath.Join(s.config.RepositoryPath, "metadata")
 	requiredFiles := []string{"root.json", "targets.json", "snapshot.json", "timestamp.json"}
 	var missingFiles []string
-	
+
 	for _, file := range requiredFiles {
 		if _, err := os.Stat(filepath.Join(metadataDir, file)); err != nil {
 			missingFiles = append(missingFiles, file)
 		}
 	}
-	
+
 	if len(missingFiles) > 0 {
 		health["status"] = "degraded"
 		health["warnings"] = []string{fmt.Sprintf("Missing metadata files: %s", strings.Join(missingFiles, ", "))}
 	}
-	
+
 	return health
 }
 
@@ -185,7 +185,7 @@ func (s *Server) infoHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getRepositoryInfo() map[string]interface{} {
 	metadataDir := filepath.Join(s.config.RepositoryPath, "metadata")
 	targetsDir := filepath.Join(s.config.RepositoryPath, "targets")
-	
+
 	// Count files
 	metadataFiles, _ := filepath.Glob(filepath.Join(metadataDir, "*.json"))
 	targetFiles, _ := filepath.Glob(filepath.Join(targetsDir, "*"))
@@ -195,13 +195,13 @@ func (s *Server) getRepositoryInfo() map[string]interface{} {
 			targetCount++
 		}
 	}
-	
+
 	// Load targets metadata
 	targetsMetadata := make(map[string]interface{})
 	if data, err := os.ReadFile(filepath.Join(metadataDir, "targets.json")); err == nil {
 		json.Unmarshal(data, &targetsMetadata)
 	}
-	
+
 	return map[string]interface{}{
 		"repository": map[string]interface{}{
 			"path":           s.config.RepositoryPath,
@@ -210,9 +210,9 @@ func (s *Server) getRepositoryInfo() map[string]interface{} {
 			"server_port":    s.config.Port,
 		},
 		"server": map[string]interface{}{
-			"version":    "2.0.0",
-			"uptime":     time.Since(s.metrics.StartTime).String(),
-			"requests":   s.metrics.TotalRequests,
+			"version":     "2.0.0",
+			"uptime":      time.Since(s.metrics.StartTime).String(),
+			"requests":    s.metrics.TotalRequests,
 			"tls_enabled": s.config.TLS.Enabled,
 		},
 		"endpoints": map[string]string{
