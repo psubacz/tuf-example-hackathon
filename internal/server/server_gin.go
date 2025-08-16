@@ -22,6 +22,7 @@ import (
 	"tuf-golang-project/internal/logger"
 	"tuf-golang-project/internal/merkle"
 	"tuf-golang-project/internal/middleware"
+	"tuf-golang-project/internal/retry"
 	"tuf-golang-project/internal/storage"
 	"tuf-golang-project/internal/tracing"
 
@@ -110,6 +111,21 @@ func NewGinServer(config *Config) *GinServer {
 		})
 	}
 	
+	// Wrap storage backend with retry logic if enabled
+	if config.Retry.Enabled {
+		retryConfig := &retry.Config{
+			MaxRetries:     config.Retry.MaxRetries,
+			InitialDelay:   config.Retry.InitialDelay,
+			MaxDelay:       config.Retry.MaxDelay,
+			Multiplier:     config.Retry.Multiplier,
+			JitterFraction: config.Retry.JitterFraction,
+		}
+		storageBackend = storage.NewRetryBackend(storageBackend, retryConfig)
+		logger.Logger.Info("Storage backend wrapped with retry logic",
+			"max_retries", config.Retry.MaxRetries,
+			"initial_delay", config.Retry.InitialDelay)
+	}
+	
 	// Initialize OpenTelemetry tracing
 	var tracerProvider *tracing.TracerProvider
 	if config.Tracing.Enabled {
@@ -196,6 +212,20 @@ func (s *GinServer) setupMiddleware() {
 	// Circuit breaker middleware for storage operations
 	if s.config.CircuitBreaker.Enabled {
 		s.router.Use(s.circuitBreakers.Middleware("storage"))
+	}
+	
+	// Retry middleware
+	if s.config.Retry.Enabled {
+		retryConfig := &middleware.RetryConfig{
+			Enabled:        s.config.Retry.Enabled,
+			MaxRetries:     s.config.Retry.MaxRetries,
+			InitialDelay:   s.config.Retry.InitialDelay,
+			MaxDelay:       s.config.Retry.MaxDelay,
+			Multiplier:     s.config.Retry.Multiplier,
+			JitterFraction: s.config.Retry.JitterFraction,
+		}
+		s.router.Use(middleware.RetryMiddleware(retryConfig))
+		s.router.Use(middleware.RetryStats())
 	}
 	
 	// Request limits and controls

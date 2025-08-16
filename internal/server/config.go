@@ -55,6 +55,9 @@ type Config struct {
 	
 	// Circuit breaker
 	CircuitBreaker CircuitBreakerConfig `json:"circuit_breaker"`
+	
+	// Retry configuration
+	Retry RetryConfig `json:"retry"`
 }
 
 // StorageConfig holds storage backend configuration
@@ -158,6 +161,16 @@ type CircuitBreakerConfig struct {
 	MinRequests uint32        `json:"min_requests"`
 }
 
+// RetryConfig holds retry configuration
+type RetryConfig struct {
+	Enabled        bool          `json:"enabled"`
+	MaxRetries     int           `json:"max_retries"`
+	InitialDelay   time.Duration `json:"initial_delay"`
+	MaxDelay       time.Duration `json:"max_delay"`
+	Multiplier     float64       `json:"multiplier"`
+	JitterFraction float64       `json:"jitter_fraction"`
+}
+
 // DefaultConfig returns default server configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -244,6 +257,15 @@ func DefaultConfig() *Config {
 			Timeout:     30 * time.Second,
 			Threshold:   0.5,
 			MinRequests: 5,
+		},
+		
+		Retry: RetryConfig{
+			Enabled:        false,
+			MaxRetries:     3,
+			InitialDelay:   100 * time.Millisecond,
+			MaxDelay:       10 * time.Second,
+			Multiplier:     2.0,
+			JitterFraction: 0.1,
 		},
 	}
 }
@@ -340,6 +362,15 @@ func (c *Config) loadFromFile(filename string) error {
 			Threshold   float64 `json:"threshold"`
 			MinRequests uint32  `json:"min_requests"`
 		} `json:"circuit_breaker"`
+		
+		Retry struct {
+			Enabled        bool    `json:"enabled"`
+			MaxRetries     int     `json:"max_retries"`
+			InitialDelay   string  `json:"initial_delay"`
+			MaxDelay       string  `json:"max_delay"`
+			Multiplier     float64 `json:"multiplier"`
+			JitterFraction float64 `json:"jitter_fraction"`
+		} `json:"retry"`
 	}
 	
 	if err := json.Unmarshal(data, &temp); err != nil {
@@ -452,6 +483,27 @@ func (c *Config) loadFromFile(filename string) error {
 			c.CircuitBreaker.Timeout = d
 		} else {
 			return fmt.Errorf("invalid circuit breaker timeout duration: %s", temp.CircuitBreaker.Timeout)
+		}
+	}
+	
+	// Parse retry configuration
+	c.Retry.Enabled = temp.Retry.Enabled
+	c.Retry.MaxRetries = temp.Retry.MaxRetries
+	c.Retry.Multiplier = temp.Retry.Multiplier
+	c.Retry.JitterFraction = temp.Retry.JitterFraction
+	
+	if temp.Retry.InitialDelay != "" {
+		if d, err := time.ParseDuration(temp.Retry.InitialDelay); err == nil {
+			c.Retry.InitialDelay = d
+		} else {
+			return fmt.Errorf("invalid retry initial delay duration: %s", temp.Retry.InitialDelay)
+		}
+	}
+	if temp.Retry.MaxDelay != "" {
+		if d, err := time.ParseDuration(temp.Retry.MaxDelay); err == nil {
+			c.Retry.MaxDelay = d
+		} else {
+			return fmt.Errorf("invalid retry max delay duration: %s", temp.Retry.MaxDelay)
 		}
 	}
 	

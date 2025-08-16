@@ -30,6 +30,14 @@
     "threshold": 0.5,
     "min_requests": 5
   },
+  "retry": {
+    "enabled": true,
+    "max_retries": 3,
+    "initial_delay": "100ms",
+    "max_delay": "10s",
+    "multiplier": 2.0,
+    "jitter_fraction": 0.1
+  },
   "auth": {
     "enabled": true,
     "jwt_secret": "advanced-secret-key-change-this",
