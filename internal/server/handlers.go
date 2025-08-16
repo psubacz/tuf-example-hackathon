@@ -29,7 +29,7 @@ func (s *Server) metadataHandler(w http.ResponseWriter, r *http.Request) {
 	// Serve metadata file
 	filePath := filepath.Join(s.config.RepositoryPath, "metadata", path)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		s.logger.Warn("Metadata file not found: %s", path)
+		s.logger.Warn("Metadata file not found", "path", path)
 		http.Error(w, "Metadata file not found", http.StatusNotFound)
 		return
 	}
@@ -61,7 +61,7 @@ func (s *Server) targetsHandler(w http.ResponseWriter, r *http.Request) {
 	// Serve target file
 	filePath := filepath.Join(s.config.RepositoryPath, "targets", path)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		s.logger.Warn("Target file not found: %s", path)
+		s.logger.Warn("Target file not found", "path", path)
 		http.Error(w, "Target file not found", http.StatusNotFound)
 		return
 	}
@@ -115,7 +115,7 @@ func (s *Server) listMetadataFiles(w http.ResponseWriter, r *http.Request) {
 	metadataDir := filepath.Join(s.config.RepositoryPath, "metadata")
 	files, err := os.ReadDir(metadataDir)
 	if err != nil {
-		s.logger.Warn("Could not read metadata directory: %v", err)
+		s.logger.Warn("Could not read metadata directory", "error", err)
 		http.Error(w, "Could not read metadata directory", http.StatusInternalServerError)
 		return
 	}
@@ -151,7 +151,7 @@ func (s *Server) listMetadataFiles(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.config.Cache.TTL.Seconds())))
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // listTargetFiles lists available target files
@@ -159,7 +159,7 @@ func (s *Server) listTargetFiles(w http.ResponseWriter, r *http.Request) {
 	targetsDir := filepath.Join(s.config.RepositoryPath, "targets")
 	files, err := os.ReadDir(targetsDir)
 	if err != nil {
-		s.logger.Warn("Could not read targets directory: %v", err)
+		s.logger.Warn("Could not read targets directory", "error", err)
 		http.Error(w, "Could not read targets directory", http.StatusInternalServerError)
 		return
 	}
@@ -196,7 +196,7 @@ func (s *Server) listTargetFiles(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.config.Cache.TTL.Seconds())))
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // getContentTypeByExt returns content type for file extension
@@ -258,7 +258,7 @@ func (s *Server) rootHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Write([]byte(html))
+	_, _ = w.Write([]byte(html))
 }
 
 // generateDashboardHTML creates the HTML dashboard

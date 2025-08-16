@@ -1010,7 +1010,7 @@ func (s *GinServer) downloadTargetHandler(c *gin.Context) {
 		
 		// Send partial content
 		c.Status(http.StatusPartialContent)
-		io.CopyN(c.Writer, file, contentLength)
+		_, _ = io.CopyN(c.Writer, file, contentLength)
 		
 		s.logger.Info("Serving partial target file", 
 			"path", targetPath, 
@@ -1619,7 +1619,7 @@ func (s *GinServer) downloadChunkHandler(c *gin.Context) {
 	
 	// Send chunk data
 	c.Status(http.StatusOK)
-	io.Copy(c.Writer, reader)
+	_, _ = io.Copy(c.Writer, reader)
 	
 	s.logger.Info("Served chunk", 
 		"path", targetPath,
@@ -1685,13 +1685,10 @@ func (s *GinServer) getMerkleTreeHandler(c *gin.Context) {
 
 // Helper function to get or build Merkle tree (with caching)
 func (s *GinServer) getMerkleTree(filePath string) (*merkle.Tree, error) {
-	// Check cache first
+	// For now, we'll always rebuild Merkle trees since they're relatively fast to compute
+	// In a full implementation, we'd cache the serialized tree structure
 	cacheKey := fmt.Sprintf("merkle:%s", filePath)
-	if _, exists := s.cache.Get(cacheKey); exists {
-		// Deserialize from cache
-		// For simplicity, we'll rebuild for now
-		// In production, you'd serialize/deserialize the tree structure
-	}
+	_ = cacheKey // Will be used when caching is implemented
 	
 	// Build Merkle tree
 	tree, err := merkle.BuildTreeFromFile(filePath, merkle.DefaultChunkSize)

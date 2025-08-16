@@ -321,7 +321,7 @@ func (app *App) newGenerateAPIKeyCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Name for the API key (required)")
 	cmd.Flags().StringVarP(&role, "role", "r", "read", "Role for the API key (read, write, admin)")
 	cmd.Flags().StringSliceVarP(&permissions, "permissions", "p", []string{}, "Specific permissions for the API key")
-	cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("name")
 
 	return cmd
 }
@@ -339,13 +339,13 @@ func (app *App) newLoginCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if username == "" {
 				fmt.Print("Username: ")
-				fmt.Scanln(&username)
+				_, _ = fmt.Scanln(&username)
 			}
 
 			if password == "" {
 				fmt.Print("Password: ")
 				// TODO: Use terminal package for hidden password input
-				fmt.Scanln(&password)
+				_, _ = fmt.Scanln(&password)
 			}
 
 			client := app.getClient()

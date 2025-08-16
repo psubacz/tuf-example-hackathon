@@ -10,7 +10,8 @@
       "Bash(kubectl logs:*)",
       "Bash(skaffold dev:*)",
       "Bash(cat:*)",
-      "Bash(./tuf-server:*)"
+      "Bash(./tuf-server:*)",
+      "Bash(golangci-lint run:*)"
     ],
     "deny": [],
     "ask": []

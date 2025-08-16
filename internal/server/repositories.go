@@ -262,22 +262,3 @@ func (s *GinServer) repositoryMiddleware() gin.HandlerFunc {
 	}
 }
 
-// Helper to get repository from context
-func getRepository(c *gin.Context) (*repository.Repository, bool) {
-	if repo, exists := c.Get("repository"); exists {
-		if r, ok := repo.(*repository.Repository); ok {
-			return r, true
-		}
-	}
-	return nil, false
-}
-
-// Helper to get repository ID from context
-func getRepositoryID(c *gin.Context) string {
-	if id, exists := c.Get("repository_id"); exists {
-		if s, ok := id.(string); ok {
-			return s
-		}
-	}
-	return "default/main"
-}

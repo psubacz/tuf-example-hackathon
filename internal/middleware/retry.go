@@ -167,7 +167,7 @@ func (c *RetryHTTPClient) Do(ctx context.Context, req *http.Request) (*http.Resp
 		if shouldRetryResponse(resp) {
 			// Read and close the response body
 			if resp.Body != nil {
-				io.Copy(io.Discard, resp.Body)
+				_, _ = io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 			}
 			lastErr = &retry.RetryableError{

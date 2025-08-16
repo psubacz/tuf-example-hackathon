@@ -73,10 +73,6 @@ func (c *Client) post(path string, body interface{}) (*http.Response, error) {
 	return c.doRequest("POST", path, bytes.NewReader(jsonBody))
 }
 
-// delete performs a DELETE request
-func (c *Client) delete(path string) (*http.Response, error) {
-	return c.doRequest("DELETE", path, nil)
-}
 
 // GetStatus retrieves server status
 func (c *Client) GetStatus() (*ServerStatus, error) {
@@ -255,7 +251,7 @@ func (c *Client) VerifyFile(path string) (*VerifyResult, error) {
 	if result.Exists {
 		// Get content length
 		if contentLength := metaResp.Header.Get("Content-Length"); contentLength != "" {
-			fmt.Sscanf(contentLength, "%d", &result.Size)
+			_, _ = fmt.Sscanf(contentLength, "%d", &result.Size)
 		}
 
 		// Calculate checksum

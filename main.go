@@ -7,5 +7,5 @@ import (
 
 func main() {
 	cli := server.NewCLI()
-	cli.Run(os.Args)
+	_ = cli.Run(os.Args)
 }

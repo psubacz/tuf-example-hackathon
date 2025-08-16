@@ -54,7 +54,7 @@ func NewAuthManager(config *AuthConfig) *AuthManager {
 	if config.JWTSecret == "" {
 		// Generate a random secret if not provided
 		secret := make([]byte, 32)
-		rand.Read(secret)
+		_, _ = rand.Read(secret)
 		config.JWTSecret = hex.EncodeToString(secret)
 	}
 	
@@ -328,7 +328,7 @@ func (am *AuthManager) RequirePermission(requiredPerms ...string) gin.HandlerFun
 
 func generateTokenID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
 

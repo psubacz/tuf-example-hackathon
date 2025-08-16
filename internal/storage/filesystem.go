@@ -307,7 +307,7 @@ func (fs *FilesystemBackend) Copy(ctx context.Context, src, dst string) error {
 	
 	// Copy metadata if exists
 	if srcMeta, err := os.ReadFile(srcPath + ".meta"); err == nil {
-		os.WriteFile(dstPath+".meta", srcMeta, 0644)
+		_ = os.WriteFile(dstPath+".meta", srcMeta, 0644)
 	}
 	
 	return dstFile.Sync()
@@ -334,7 +334,7 @@ func (fs *FilesystemBackend) Move(ctx context.Context, src, dst string) error {
 	}
 	
 	// Also move metadata file if it exists
-	os.Rename(srcPath+".meta", dstPath+".meta")
+	_ = os.Rename(srcPath+".meta", dstPath+".meta")
 	
 	return nil
 }

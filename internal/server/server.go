@@ -135,7 +135,7 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(health)
+	_ = json.NewEncoder(w).Encode(health)
 }
 
 // checkHealth performs health checks
@@ -178,7 +178,7 @@ func (s *Server) checkHealth() map[string]interface{} {
 func (s *Server) infoHandler(w http.ResponseWriter, r *http.Request) {
 	info := s.getRepositoryInfo()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	_ = json.NewEncoder(w).Encode(info)
 }
 
 // getRepositoryInfo gathers repository statistics
@@ -199,7 +199,7 @@ func (s *Server) getRepositoryInfo() map[string]interface{} {
 	// Load targets metadata
 	targetsMetadata := make(map[string]interface{})
 	if data, err := os.ReadFile(filepath.Join(metadataDir, "targets.json")); err == nil {
-		json.Unmarshal(data, &targetsMetadata)
+		_ = json.Unmarshal(data, &targetsMetadata)
 	}
 
 	return map[string]interface{}{

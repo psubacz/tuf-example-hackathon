@@ -206,7 +206,7 @@ func (rc *RequestCoalescer) distributeResult(key string, result *CoalescedResult
 // applyResult applies a coalesced result to a response
 func (rc *RequestCoalescer) applyResult(c *gin.Context, result *CoalescedResult) {
 	if result.Error != nil {
-		c.AbortWithError(http.StatusInternalServerError, result.Error)
+		_ = c.AbortWithError(http.StatusInternalServerError, result.Error)
 		return
 	}
 
@@ -222,7 +222,7 @@ func (rc *RequestCoalescer) applyResult(c *gin.Context, result *CoalescedResult)
 
 	// Write status and body
 	c.Status(result.StatusCode)
-	c.Writer.Write(result.Body)
+	_, _ = c.Writer.Write(result.Body)
 	c.Abort()
 }
 

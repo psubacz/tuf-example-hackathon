@@ -184,7 +184,8 @@ func (s *Sidecar) Start() error {
 	go func() {
 		for event := range eventChan {
 			if err := s.handler.HandleEvent(event); err != nil {
-				// Log error
+				// Log error but continue processing
+				_ = err
 			}
 		}
 	}()

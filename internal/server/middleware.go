@@ -2,7 +2,6 @@ package server
 
 import (
 	"compress/gzip"
-	"context"
 	"io"
 	"net"
 	"net/http"
@@ -43,8 +42,13 @@ func (s *Server) loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		// Log request
 		duration := time.Since(start)
-		s.logger.Info("%s %s %s %d %d bytes %v",
-			r.Method, r.URL.Path, r.RemoteAddr, rw.statusCode, rw.size, duration)
+		s.logger.Info("Request completed",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"remote_addr", r.RemoteAddr,
+			"status", rw.statusCode,
+			"size", rw.size,
+			"duration", duration)
 
 		// Record metrics
 		s.metrics.RecordRequest(r.Method, r.URL.Path, rw.statusCode, duration)
@@ -303,42 +307,3 @@ func getClientIP(r *http.Request) string {
 	return ip
 }
 
-// timeoutMiddleware adds request timeout
-func (s *Server) timeoutMiddleware(timeout time.Duration) func(http.HandlerFunc) http.HandlerFunc {
-	return func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), timeout)
-			defer cancel()
-
-			r = r.WithContext(ctx)
-
-			done := make(chan struct{})
-			go func() {
-				next(w, r)
-				close(done)
-			}()
-
-			select {
-			case <-done:
-				return
-			case <-ctx.Done():
-				http.Error(w, "Request timeout", http.StatusRequestTimeout)
-				return
-			}
-		}
-	}
-}
-
-// recoveryMiddleware recovers from panics
-func (s *Server) recoveryMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := recover(); err != nil {
-				s.logger.Info("PANIC: %v", err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-			}
-		}()
-
-		next(w, r)
-	}
-}

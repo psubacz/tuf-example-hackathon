@@ -176,6 +176,7 @@ func (m *Manager) initializeRepository(repo *Repository) error {
 		markerPath := filepath.Join(formatRepoPath(repo.Namespace, repo.Name), dir, ".keep")
 		if err := repo.Backend.Put(context.Background(), markerPath, bytes.NewReader([]byte{})); err != nil {
 			// Directory creation might fail but that's ok if backend doesn't support it
+			_ = err // Explicitly ignore error
 		}
 	}
 

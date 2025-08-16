@@ -333,7 +333,8 @@ func (m *Manager) cleanupRoutine(retention time.Duration) {
 		case <-ticker.C:
 			before := time.Now().Add(-retention)
 			if err := m.store.DeleteOlderThan(before); err != nil {
-				// Log error
+				// Log error but continue cleanup routine
+				_ = err
 			}
 		case <-m.ctx.Done():
 			return

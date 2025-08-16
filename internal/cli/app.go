@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -49,11 +48,11 @@ managing API keys, rotating keys, and checking server status.`,
 	app.rootCmd.PersistentFlags().BoolVarP(&app.config.Verbose, "verbose", "v", false, "Verbose output")
 
 	// Bind flags to viper
-	viper.BindPFlag("server_url", app.rootCmd.PersistentFlags().Lookup("server"))
-	viper.BindPFlag("api_key", app.rootCmd.PersistentFlags().Lookup("api-key"))
-	viper.BindPFlag("jwt_token", app.rootCmd.PersistentFlags().Lookup("jwt"))
-	viper.BindPFlag("output_format", app.rootCmd.PersistentFlags().Lookup("output"))
-	viper.BindPFlag("verbose", app.rootCmd.PersistentFlags().Lookup("verbose"))
+	_ = viper.BindPFlag("server_url", app.rootCmd.PersistentFlags().Lookup("server"))
+	_ = viper.BindPFlag("api_key", app.rootCmd.PersistentFlags().Lookup("api-key"))
+	_ = viper.BindPFlag("jwt_token", app.rootCmd.PersistentFlags().Lookup("jwt"))
+	_ = viper.BindPFlag("output_format", app.rootCmd.PersistentFlags().Lookup("output"))
+	_ = viper.BindPFlag("verbose", app.rootCmd.PersistentFlags().Lookup("verbose"))
 
 	// Add commands
 	app.addCommands()
@@ -137,10 +136,3 @@ func (app *App) output(data interface{}) error {
 	}
 }
 
-// outputPath returns the output path for a file
-func outputPath(filename string, outputDir string) string {
-	if outputDir != "" {
-		return filepath.Join(outputDir, filepath.Base(filename))
-	}
-	return filepath.Base(filename)
-}
