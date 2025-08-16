@@ -1,0 +1,54 @@
+{
+  "port": 8085,
+  "repository_path": "./tuf-repository",
+  "log_level": "info",
+  "log_format": "text",
+  "storage": {
+    "type": "s3",
+    "properties": {
+      "bucket": "my-tuf-repository",
+      "prefix": "tuf",
+      "region": "us-east-1",
+      "endpoint": ""
+    }
+  },
+  "auth": {
+    "enabled": true,
+    "jwt_secret": "production-secret-key-change-this",
+    "jwt_expiration": "24h",
+    "api_keys": {
+      "prod-api-key-123": "Production API Key"
+    },
+    "admin_users": [
+      {
+        "username": "admin",
+        "password": "change-this-password",
+        "role": "admin",
+        "permissions": ["*"]
+      }
+    ]
+  },
+  "cache": {
+    "enabled": true,
+    "ttl": "5m",
+    "max_size": 100,
+    "cleanup_freq": "10m"
+  },
+  "rate_limit": {
+    "enabled": true,
+    "requests": 1000,
+    "window": "1h",
+    "burst_size": 100
+  },
+  "cors": {
+    "enabled": true,
+    "allowed_origins": ["https://example.com"],
+    "allowed_methods": ["GET", "POST", "OPTIONS"],
+    "allowed_headers": ["Content-Type", "Authorization"],
+    "max_age": 3600
+  },
+  "metrics": {
+    "enabled": true,
+    "path": "/metrics"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "port": 8085,
+  "repository_path": "./tuf-repository",
+  "log_level": "info",
+  "log_format": "text",
+  "auth": {
+    "enabled": true,
+    "jwt_secret": "test-secret-key-for-development-only",
+    "jwt_expiration": "24h",
+    "api_keys": {
+      "test-api-key-123": "Test API Key for Development"
+    },
+    "admin_users": [
+      {
+        "username": "admin",
+        "password": "admin123",
+        "role": "admin",
+        "permissions": ["*"]
+      }
+    ]
+  }
+}

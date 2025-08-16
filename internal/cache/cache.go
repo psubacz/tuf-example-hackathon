@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -138,6 +139,33 @@ func (c *MetadataCache) SetRaw(key string, content []byte, contentType string, t
 	c.mu.Lock()
 	c.entries[key] = entry
 	c.mu.Unlock()
+}
+
+// SetContent stores content with specific metadata in the cache
+func (c *MetadataCache) SetContent(key string, content []byte, etag string, lastModified time.Time) error {
+	// Determine TTL based on file type
+	ttl := c.getTTLForFile(key)
+	
+	// Determine content type
+	contentType := "application/json"
+	if strings.HasSuffix(key, ".json") {
+		contentType = "application/json"
+	}
+	
+	entry := &CacheEntry{
+		Content:      content,
+		ETag:         etag,
+		LastModified: lastModified,
+		ExpiresAt:    time.Now().Add(ttl),
+		ContentType:  contentType,
+		Size:         int64(len(content)),
+	}
+	
+	c.mu.Lock()
+	c.entries[key] = entry
+	c.mu.Unlock()
+	
+	return nil
 }
 
 // Invalidate removes an entry from the cache

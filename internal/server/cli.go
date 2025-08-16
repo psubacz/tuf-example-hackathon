@@ -29,18 +29,26 @@ func NewCLI() *CLI {
 func (cli *CLI) Run(args []string) error {
 	// Parse command line arguments
 	if err := cli.parseArgs(args); err != nil {
+		logger.Logger.Error("parseArgs failed", "error", err)
 		return err
 	}
+	
+	logger.Logger.Info("After parseArgs")
 
 	// Load configuration
 	config, err := cli.loadConfig()
 	if err != nil {
+		logger.Logger.Error("loadConfig failed", "error", err)
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 	cli.config = config
+	
+	logger.Logger.Info("After loadConfig", "config", config)
 
 	// Create and start server
 	cli.server = NewGinServer(config)
+	
+	logger.Logger.Info("After NewGinServer")
 
 	// Setup graceful shutdown
 	return cli.runWithGracefulShutdown()
@@ -91,7 +99,7 @@ func (cli *CLI) parseArgs(args []string) error {
 			return err
 		}
 		logger.Logger.Info("Repository initialization complete")
-		return nil
+		os.Exit(0) // Exit successfully after init
 	}
 	
 	logger.Logger.Info("Running server mode")
@@ -129,16 +137,31 @@ func (cli *CLI) loadConfig() (*Config, error) {
 
 	// Apply command line overrides if cli.config was set
 	if cli.config != nil {
-		config.Port = cli.config.Port
-		config.Host = cli.config.Host
-		config.RepositoryPath = cli.config.RepositoryPath
-		config.LogLevel = cli.config.LogLevel
+		if cli.config.Port != 0 {
+			config.Port = cli.config.Port
+		}
+		if cli.config.Host != "" {
+			config.Host = cli.config.Host
+		}
+		if cli.config.RepositoryPath != "" {
+			config.RepositoryPath = cli.config.RepositoryPath
+		}
+		if cli.config.LogLevel != "" {
+			config.LogLevel = cli.config.LogLevel
+		}
+		// TLS, Metrics, CORS are booleans - always override
 		config.TLS.Enabled = cli.config.TLS.Enabled
-		config.TLS.CertFile = cli.config.TLS.CertFile
-		config.TLS.KeyFile = cli.config.TLS.KeyFile
+		if cli.config.TLS.CertFile != "" {
+			config.TLS.CertFile = cli.config.TLS.CertFile
+		}
+		if cli.config.TLS.KeyFile != "" {
+			config.TLS.KeyFile = cli.config.TLS.KeyFile
+		}
 		config.Metrics.Enabled = cli.config.Metrics.Enabled
 		config.CORS.Enabled = cli.config.CORS.Enabled
-		config.RateLimit.Requests = cli.config.RateLimit.Requests
+		if cli.config.RateLimit.Requests != 0 {
+			config.RateLimit.Requests = cli.config.RateLimit.Requests
+		}
 	}
 
 	return config, nil

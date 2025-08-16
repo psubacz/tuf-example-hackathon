@@ -38,6 +38,35 @@ type Config struct {
 	
 	// Monitoring
 	Metrics MetricsConfig `json:"metrics"`
+	
+	// Authentication
+	Auth AuthConfig `json:"auth"`
+	
+	// Storage backend
+	Storage StorageConfig `json:"storage"`
+}
+
+// StorageConfig holds storage backend configuration
+type StorageConfig struct {
+	Type       string                 `json:"type"`       // "filesystem", "s3", "gcs", "azure"
+	Properties map[string]interface{} `json:"properties"` // Backend-specific properties
+}
+
+// AuthConfig holds authentication configuration
+type AuthConfig struct {
+	Enabled       bool              `json:"enabled"`
+	JWTSecret     string            `json:"jwt_secret"`
+	JWTExpiration string            `json:"jwt_expiration"` // e.g., "24h"
+	APIKeys       map[string]string `json:"api_keys"`       // key -> description
+	AdminUsers    []AdminUser       `json:"admin_users"`
+}
+
+// AdminUser represents an admin user
+type AdminUser struct {
+	Username string   `json:"username"`
+	Password string   `json:"password"` // Should be hashed in production
+	Role     string   `json:"role"`
+	Permissions []string `json:"permissions"`
 }
 
 // TLSConfig holds TLS/HTTPS configuration
@@ -139,6 +168,20 @@ func DefaultConfig() *Config {
 		Metrics: MetricsConfig{
 			Enabled: true,
 			Path:    "/metrics",
+		},
+		
+		Auth: AuthConfig{
+			Enabled:       false, // Disabled by default
+			JWTExpiration: "24h",
+			APIKeys:       make(map[string]string),
+			AdminUsers:    []AdminUser{},
+		},
+		
+		Storage: StorageConfig{
+			Type: "filesystem",
+			Properties: map[string]interface{}{
+				"base_path": "./tuf-repository",
+			},
 		},
 	}
 }

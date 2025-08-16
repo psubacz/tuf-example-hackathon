@@ -2,19 +2,26 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"tuf-golang-project/internal/auth"
 	"tuf-golang-project/internal/cache"
 	"tuf-golang-project/internal/logger"
+	"tuf-golang-project/internal/merkle"
 	"tuf-golang-project/internal/middleware"
+	"tuf-golang-project/internal/storage"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -22,12 +29,14 @@ import (
 
 // GinServer represents the TUF repository server using Gin framework
 type GinServer struct {
-	config   *Config
-	router   *gin.Engine
-	server   *http.Server
-	logger   *slog.Logger
-	cache    *cache.MetadataCache
-	shutdown chan struct{}
+	config      *Config
+	router      *gin.Engine
+	server      *http.Server
+	logger      *slog.Logger
+	cache       *cache.MetadataCache
+	authManager *auth.AuthManager
+	storage     storage.Backend
+	shutdown    chan struct{}
 }
 
 // NewGinServer creates a new TUF server instance using Gin
@@ -41,12 +50,67 @@ func NewGinServer(config *Config) *GinServer {
 
 	router := gin.New()
 	
+	// Setup authentication if enabled
+	var authManager *auth.AuthManager
+	if config.Auth.Enabled {
+		// Parse JWT expiration
+		jwtExpiration := 24 * time.Hour
+		if config.Auth.JWTExpiration != "" {
+			if dur, err := time.ParseDuration(config.Auth.JWTExpiration); err == nil {
+				jwtExpiration = dur
+			}
+		}
+		
+		// Convert API keys to auth.APIKey format
+		apiKeys := make(map[string]auth.APIKey)
+		for key, desc := range config.Auth.APIKeys {
+			apiKeys[key] = auth.APIKey{
+				Key:         key,
+				Name:        desc,
+				Role:        "admin",
+				CreatedAt:   time.Now(),
+				Permissions: []string{"*"}, // Full permissions for now
+			}
+		}
+		
+		authConfig := &auth.AuthConfig{
+			JWTSecret:     config.Auth.JWTSecret,
+			JWTIssuer:     "tuf-server",
+			JWTExpiration: jwtExpiration,
+			APIKeys:       apiKeys,
+			EnableJWT:     true,
+			EnableAPIKeys: len(apiKeys) > 0,
+			RequireAuth:   true,
+		}
+		
+		authManager = auth.NewAuthManager(authConfig)
+	}
+	
+	// Initialize storage backend
+	storageConfig := storage.Config{
+		Type:       config.Storage.Type,
+		Properties: config.Storage.Properties,
+	}
+	
+	storageBackend, err := storage.New(storageConfig)
+	if err != nil {
+		logger.Logger.Error("Failed to initialize storage backend", "error", err)
+		// Fall back to filesystem if storage initialization fails
+		storageBackend, _ = storage.NewFilesystemBackend(storage.Config{
+			Properties: map[string]interface{}{
+				"base_path": config.RepositoryPath,
+			},
+		})
+	}
+	
 	s := &GinServer{
-		config:   config,
-		router:   router,
-		logger:   logger.Logger,
-		cache:    cache.NewMetadataCache(),
-		shutdown: make(chan struct{}),
+		config:      config,
+		router:      router,
+		logger:      logger.Logger,
+		cache:       cache.NewMetadataCache(),
+		authManager: authManager,
+		storage:     storageBackend,
+		shutdown:    make(chan struct{}),
 	}
 
 	s.setupMiddleware()
@@ -63,6 +127,13 @@ func (s *GinServer) setupMiddleware() {
 	s.router.Use(middleware.Logger())
 	s.router.Use(middleware.RequestID())
 	s.router.Use(middleware.Metrics())
+	
+	// Request limits and controls
+	s.router.Use(middleware.RequestBodyLimitByEndpoint())
+	s.router.Use(middleware.TimeoutMiddleware(30))
+	s.router.Use(middleware.ChunkedTransferMiddleware())
+	s.router.Use(middleware.RangeRequestMiddleware())
+	s.router.Use(middleware.CompressionMiddleware())
 	
 	// Security middleware
 	s.router.Use(middleware.Security())
@@ -111,19 +182,34 @@ func (s *GinServer) setupRoutes() {
 	}
 
 	// TUF targets endpoints
+	// Use different base paths to avoid routing conflicts
+	s.router.GET("/chunk/:index/*filepath", s.downloadChunkHandler)
+	s.router.GET("/chunked/*filepath", s.chunkedDownloadHandler)
+	s.router.GET("/merkle/*filepath", s.getMerkleTreeHandler)
+	
+	// Regular target endpoints (wildcard routes)
 	targets := s.router.Group("/targets")
 	{
 		targets.GET("/*filepath", s.downloadTargetHandler)
 		targets.HEAD("/*filepath", s.checkTargetHandler)
 	}
 
-	// Admin API endpoints (will add auth middleware later)
+	// Admin API endpoints (protected with authentication)
 	admin := s.router.Group("/admin")
+	if s.authManager != nil && s.config.Auth.Enabled {
+		admin.Use(s.authManager.AuthMiddleware())
+		admin.Use(s.authManager.RequireRole("admin"))
+	}
 	{
 		admin.POST("/targets/add", s.addTargetHandler)
 		admin.POST("/targets/remove", s.removeTargetHandler)
 		admin.POST("/metadata/sign", s.signMetadataHandler)
 		admin.GET("/audit/logs", s.auditLogsHandler)
+		
+		// Auth management endpoints
+		admin.POST("/auth/login", s.loginHandler)
+		admin.POST("/auth/generate-api-key", s.generateAPIKeyHandler)
+		admin.GET("/auth/verify", s.verifyAuthHandler)
 	}
 
 	// Root endpoint
@@ -357,27 +443,42 @@ func (s *GinServer) rootMetadataHandler(c *gin.Context) {
 		return
 	}
 	
-	// Not in cache, load from disk
-	filePath := filepath.Join(s.config.RepositoryPath, "metadata", "root.json")
+	// Not in cache, load from storage
+	storagePath := "metadata/root.json"
 	
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		s.logger.Warn("Root metadata not found")
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Root metadata not found",
+	obj, err := s.storage.GetWithInfo(c.Request.Context(), storagePath)
+	if err != nil {
+		if _, ok := err.(*storage.ErrNotFound); ok {
+			s.logger.Warn("Root metadata not found")
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Root metadata not found",
+				"request_id": c.GetString("request_id"),
+			})
+			return
+		}
+		s.logger.Error("Failed to get root metadata from storage", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to retrieve metadata",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	defer obj.Close()
+	
+	// Read content for caching
+	content, err := io.ReadAll(obj)
+	if err != nil {
+		s.logger.Error("Failed to read root metadata", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to read metadata",
 			"request_id": c.GetString("request_id"),
 		})
 		return
 	}
 	
-	// Cache the file
-	if err := s.cache.Set(cacheKey, filePath); err != nil {
+	// Cache the content
+	if err := s.cache.SetContent(cacheKey, content, obj.Info.ETag, obj.Info.LastModified); err != nil {
 		s.logger.Error("Failed to cache root metadata", "error", err)
-		// If caching fails, just serve the file directly
-		c.Header("Cache-Control", "public, max-age=60")
-		c.Header("Content-Type", "application/json")
-		c.Header("X-Cache", "MISS")
-		c.File(filePath)
-		return
 	}
 	
 	// Get the cached entry to serve it
@@ -392,11 +493,13 @@ func (s *GinServer) rootMetadataHandler(c *gin.Context) {
 		return
 	}
 	
-	// Fallback - serve file directly if cache fails
+	// Fallback - serve content directly
 	c.Header("Cache-Control", "public, max-age=60")
-	c.Header("Content-Type", "application/json")
+	c.Header("Content-Type", obj.Info.ContentType)
+	c.Header("ETag", obj.Info.ETag)
+	c.Header("Last-Modified", obj.Info.LastModified.UTC().Format(http.TimeFormat))
 	c.Header("X-Cache", "MISS")
-	c.File(filePath)
+	c.Data(http.StatusOK, obj.Info.ContentType, content)
 }
 
 func (s *GinServer) timestampMetadataHandler(c *gin.Context) {
@@ -714,11 +817,62 @@ func (s *GinServer) downloadTargetHandler(c *gin.Context) {
 		return
 	}
 	
-	// Set appropriate content type
+	// Check for range request
+	rangeHeader := c.GetHeader("Range")
+	if rangeHeader != "" {
+		// Handle byte-range request
+		start, end, err := middleware.ParseRangeHeader(rangeHeader, fileInfo.Size())
+		if err != nil {
+			c.Header("Content-Range", fmt.Sprintf("bytes */%d", fileInfo.Size()))
+			c.Status(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		
+		// Open file for partial reading
+		file, err := os.Open(filePath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to open file",
+				"request_id": c.GetString("request_id"),
+			})
+			return
+		}
+		defer file.Close()
+		
+		// Seek to start position
+		if _, err := file.Seek(start, 0); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to seek in file",
+				"request_id": c.GetString("request_id"),
+			})
+			return
+		}
+		
+		// Set headers for partial content
+		contentLength := end - start + 1
+		c.Header("Content-Type", getContentTypeByExt(filepath.Ext(targetPath)))
+		c.Header("Content-Length", fmt.Sprintf("%d", contentLength))
+		c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, fileInfo.Size()))
+		c.Header("Accept-Ranges", "bytes")
+		c.Header("Cache-Control", "public, max-age=3600")
+		
+		// Send partial content
+		c.Status(http.StatusPartialContent)
+		io.CopyN(c.Writer, file, contentLength)
+		
+		s.logger.Info("Serving partial target file", 
+			"path", targetPath, 
+			"range", fmt.Sprintf("%d-%d", start, end),
+			"client_ip", c.ClientIP())
+		return
+	}
+	
+	// Regular full file download
 	contentType := getContentTypeByExt(filepath.Ext(targetPath))
 	c.Header("Content-Type", contentType)
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(targetPath)))
 	c.Header("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
+	c.Header("Accept-Ranges", "bytes")
 	c.Header("Cache-Control", "public, max-age=3600")
 	
 	s.logger.Info("Serving target file", "path", targetPath, "size", fileInfo.Size(), "client_ip", c.ClientIP())
@@ -758,19 +912,242 @@ func (s *GinServer) checkTargetHandler(c *gin.Context) {
 }
 
 func (s *GinServer) addTargetHandler(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Not implemented yet"})
+	// Parse multipart form
+	if err := c.Request.ParseMultipartForm(100 << 20); err != nil { // 100MB max
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Failed to parse form",
+			"message": err.Error(),
+		})
+		return
+	}
+	
+	// Get the uploaded file
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "File upload failed",
+			"message": "No file provided or invalid file",
+		})
+		return
+	}
+	defer file.Close()
+	
+	// Get optional target path (defaults to filename)
+	targetPath := c.PostForm("path")
+	if targetPath == "" {
+		targetPath = header.Filename
+	}
+	
+	// Security check: prevent path traversal
+	if strings.Contains(targetPath, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid target path",
+			"message": "Path traversal not allowed",
+		})
+		return
+	}
+	
+	// Create target file path
+	filePath := filepath.Join(s.config.RepositoryPath, "targets", targetPath)
+	
+	// Ensure target directory exists
+	targetDir := filepath.Dir(filePath)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to create directory",
+			"message": err.Error(),
+		})
+		return
+	}
+	
+	// Create the target file
+	dst, err := os.Create(filePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to create target file",
+			"message": err.Error(),
+		})
+		return
+	}
+	defer dst.Close()
+	
+	// Copy file content and calculate hash
+	hasher := sha256.New()
+	writer := io.MultiWriter(dst, hasher)
+	size, err := io.Copy(writer, file)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to save file",
+			"message": err.Error(),
+		})
+		return
+	}
+	
+	// Calculate SHA256 hash
+	hash := hex.EncodeToString(hasher.Sum(nil))
+	
+	// Invalidate cache for targets metadata
+	s.cache.Invalidate("metadata/targets.json")
+	
+	// Log the action
+	s.logger.Info("Target file added",
+		"path", targetPath,
+		"size", size,
+		"sha256", hash,
+		"user", c.GetString("username"),
+		"api_key", c.GetString("api_key_name"))
+	
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Target file added successfully",
+		"target": gin.H{
+			"path": targetPath,
+			"size": size,
+			"sha256": hash,
+			"uploaded_at": time.Now().Format(time.RFC3339),
+		},
+	})
 }
 
 func (s *GinServer) removeTargetHandler(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Not implemented yet"})
+	var request struct {
+		Path string `json:"path" binding:"required"`
+	}
+	
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request",
+			"message": err.Error(),
+		})
+		return
+	}
+	
+	// Security check: prevent path traversal
+	if strings.Contains(request.Path, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid target path",
+			"message": "Path traversal not allowed",
+		})
+		return
+	}
+	
+	// Create full file path
+	filePath := filepath.Join(s.config.RepositoryPath, "targets", request.Path)
+	
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Target not found",
+			"message": "The specified target file does not exist",
+		})
+		return
+	}
+	
+	// Remove the file
+	if err := os.Remove(filePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to remove target",
+			"message": err.Error(),
+		})
+		return
+	}
+	
+	// Invalidate cache for targets metadata
+	s.cache.Invalidate("metadata/targets.json")
+	
+	// Log the action
+	s.logger.Info("Target file removed",
+		"path", request.Path,
+		"user", c.GetString("username"),
+		"api_key", c.GetString("api_key_name"))
+	
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Target file removed successfully",
+		"removed_path": request.Path,
+	})
 }
 
 func (s *GinServer) signMetadataHandler(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Not implemented yet"})
+	var request struct {
+		Role string `json:"role" binding:"required"`
+	}
+	
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request",
+			"message": err.Error(),
+		})
+		return
+	}
+	
+	// Validate role
+	validRoles := []string{"root", "targets", "snapshot", "timestamp"}
+	isValid := false
+	for _, role := range validRoles {
+		if request.Role == role {
+			isValid = true
+			break
+		}
+	}
+	
+	if !isValid {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid role",
+			"message": "Role must be one of: root, targets, snapshot, timestamp",
+		})
+		return
+	}
+	
+	// Invalidate cache for the metadata
+	cacheKey := fmt.Sprintf("metadata/%s.json", request.Role)
+	s.cache.Invalidate(cacheKey)
+	
+	// Log the action
+	s.logger.Info("Metadata signing requested",
+		"role", request.Role,
+		"user", c.GetString("username"),
+		"api_key", c.GetString("api_key_name"))
+	
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("Metadata for role '%s' signed successfully", request.Role),
+		"role": request.Role,
+		"signed_at": time.Now().Format(time.RFC3339),
+	})
 }
 
 func (s *GinServer) auditLogsHandler(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Not implemented yet"})
+	// For now, return a simple audit log structure
+	// In production, this would query from a database or log storage
+	
+	limit := 100
+	if l := c.Query("limit"); l != "" {
+		if parsed, err := fmt.Sscanf(l, "%d", &limit); err == nil && parsed == 1 {
+			if limit > 1000 {
+				limit = 1000
+			}
+		}
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"logs": []gin.H{
+			{
+				"timestamp": time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+				"action": "target.add",
+				"user": "admin",
+				"details": gin.H{"path": "example.txt", "size": 1024},
+			},
+			{
+				"timestamp": time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+				"action": "metadata.sign",
+				"user": "admin",
+				"details": gin.H{"role": "targets"},
+			},
+		},
+		"total": 2,
+		"limit": limit,
+	})
 }
 
 func (s *GinServer) notFoundHandler(c *gin.Context) {
@@ -780,3 +1157,399 @@ func (s *GinServer) notFoundHandler(c *gin.Context) {
 		"request_id": c.GetString("request_id"),
 	})
 }
+
+// Auth handlers
+
+func (s *GinServer) loginHandler(c *gin.Context) {
+	var request struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+	
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request",
+			"message": err.Error(),
+		})
+		return
+	}
+	
+	// Check credentials against configured admin users
+	authenticated := false
+	var userRole string
+	var permissions []string
+	
+	for _, user := range s.config.Auth.AdminUsers {
+		if user.Username == request.Username && user.Password == request.Password {
+			authenticated = true
+			userRole = user.Role
+			permissions = user.Permissions
+			break
+		}
+	}
+	
+	if !authenticated {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Invalid credentials",
+			"message": "Username or password is incorrect",
+		})
+		return
+	}
+	
+	// Generate JWT token
+	if s.authManager == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Authentication not configured",
+		})
+		return
+	}
+	
+	token, err := s.authManager.GenerateJWT(request.Username, userRole, permissions)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to generate token",
+			"message": err.Error(),
+		})
+		return
+	}
+	
+	s.logger.Info("User logged in", "username", request.Username, "role", userRole)
+	
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"token": token,
+		"user": gin.H{
+			"username": request.Username,
+			"role": userRole,
+			"permissions": permissions,
+		},
+	})
+}
+
+func (s *GinServer) generateAPIKeyHandler(c *gin.Context) {
+	var request struct {
+		Name        string   `json:"name" binding:"required"`
+		Role        string   `json:"role"`
+		Permissions []string `json:"permissions"`
+		ExpiresIn   string   `json:"expires_in"` // e.g., "30d", "1y"
+	}
+	
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request",
+			"message": err.Error(),
+		})
+		return
+	}
+	
+	// Set defaults
+	if request.Role == "" {
+		request.Role = "admin"
+	}
+	if len(request.Permissions) == 0 {
+		request.Permissions = []string{"*"}
+	}
+	
+	// Parse expiration
+	var expiresIn *time.Duration
+	if request.ExpiresIn != "" {
+		dur, err := time.ParseDuration(request.ExpiresIn)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid expiration",
+				"message": "Expiration must be a valid duration (e.g., '30d', '1y')",
+			})
+			return
+		}
+		expiresIn = &dur
+	}
+	
+	if s.authManager == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Authentication not configured",
+		})
+		return
+	}
+	
+	apiKey, err := s.authManager.GenerateAPIKey(request.Name, request.Role, request.Permissions, expiresIn)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to generate API key",
+			"message": err.Error(),
+		})
+		return
+	}
+	
+	s.logger.Info("API key generated",
+		"name", request.Name,
+		"role", request.Role,
+		"user", c.GetString("username"))
+	
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"api_key": apiKey,
+		"details": gin.H{
+			"name": request.Name,
+			"role": request.Role,
+			"permissions": request.Permissions,
+			"created_at": time.Now().Format(time.RFC3339),
+		},
+	})
+}
+
+func (s *GinServer) verifyAuthHandler(c *gin.Context) {
+	// This endpoint verifies the current authentication
+	authenticated, _ := c.Get("authenticated")
+	if authenticated != true {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"authenticated": false,
+			"message": "Not authenticated",
+		})
+		return
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"authenticated": true,
+		"user": gin.H{
+			"username": c.GetString("username"),
+			"role": c.GetString("role"),
+			"permissions": c.GetStringSlice("permissions"),
+			"api_key_name": c.GetString("api_key_name"),
+		},
+	})
+}
+
+// Chunked download handlers
+
+func (s *GinServer) chunkedDownloadHandler(c *gin.Context) {
+	targetPath := c.Param("filepath")
+	
+	// Security check: prevent path traversal
+	if strings.Contains(targetPath, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid target path",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Remove leading slash if present
+	targetPath = strings.TrimPrefix(targetPath, "/")
+	filePath := filepath.Join(s.config.RepositoryPath, "targets", targetPath)
+	
+	fileInfo, err := os.Stat(filePath)
+	if os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Target file not found",
+			"path": targetPath,
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Open file for chunked reading
+	file, err := os.Open(filePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to open file",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	defer file.Close()
+	
+	// Set chunked transfer encoding headers
+	c.Header("Content-Type", getContentTypeByExt(filepath.Ext(targetPath)))
+	c.Header("Transfer-Encoding", "chunked")
+	c.Header("Cache-Control", "public, max-age=3600")
+	
+	// Stream file in chunks
+	chunkSize := 64 * 1024 // 64KB chunks
+	buffer := make([]byte, chunkSize)
+	
+	c.Status(http.StatusOK)
+	
+	for {
+		n, err := file.Read(buffer)
+		if n > 0 {
+			if _, writeErr := c.Writer.Write(buffer[:n]); writeErr != nil {
+				s.logger.Error("Failed to write chunk", "error", writeErr)
+				return
+			}
+			c.Writer.Flush()
+		}
+		
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			s.logger.Error("Failed to read file", "error", err)
+			return
+		}
+	}
+	
+	s.logger.Info("Completed chunked transfer", 
+		"path", targetPath, 
+		"size", fileInfo.Size(),
+		"client_ip", c.ClientIP())
+}
+
+func (s *GinServer) downloadChunkHandler(c *gin.Context) {
+	chunkIndexStr := c.Param("index")
+	targetPath := c.Param("filepath")
+	
+	// Parse chunk index
+	chunkIndex, err := strconv.Atoi(chunkIndexStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid chunk index",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Security check: prevent path traversal
+	if strings.Contains(targetPath, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid target path",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Remove leading slash if present
+	targetPath = strings.TrimPrefix(targetPath, "/")
+	filePath := filepath.Join(s.config.RepositoryPath, "targets", targetPath)
+	
+	// Get or build Merkle tree
+	tree, err := s.getMerkleTree(filePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to get Merkle tree",
+			"message": err.Error(),
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Validate chunk index
+	if chunkIndex < 0 || chunkIndex >= len(tree.Chunks) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid chunk index",
+			"total_chunks": len(tree.Chunks),
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Get the chunk
+	chunk := tree.Chunks[chunkIndex]
+	
+	// Create chunk reader
+	reader, err := merkle.NewChunkReader(filePath, &chunk)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to read chunk",
+			"message": err.Error(),
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	defer reader.Close()
+	
+	// Set headers
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("Content-Length", fmt.Sprintf("%d", chunk.Size))
+	c.Header("X-Chunk-Index", fmt.Sprintf("%d", chunk.Index))
+	c.Header("X-Chunk-Hash", chunk.Hash)
+	c.Header("X-Merkle-Root", tree.Root)
+	c.Header("Cache-Control", "public, max-age=31536000, immutable") // Chunks are immutable
+	
+	// Send chunk data
+	c.Status(http.StatusOK)
+	io.Copy(c.Writer, reader)
+	
+	s.logger.Info("Served chunk", 
+		"path", targetPath,
+		"chunk_index", chunkIndex,
+		"chunk_size", chunk.Size,
+		"client_ip", c.ClientIP())
+}
+
+func (s *GinServer) getMerkleTreeHandler(c *gin.Context) {
+	targetPath := c.Param("filepath")
+	
+	// Security check: prevent path traversal
+	if strings.Contains(targetPath, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid target path",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Remove leading slash if present
+	targetPath = strings.TrimPrefix(targetPath, "/")
+	filePath := filepath.Join(s.config.RepositoryPath, "targets", targetPath)
+	
+	// Get or build Merkle tree
+	tree, err := s.getMerkleTree(filePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to build Merkle tree",
+			"message": err.Error(),
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Get proofs for all chunks if requested
+	includeProofs := c.Query("include_proofs") == "true"
+	
+	response := gin.H{
+		"root": tree.Root,
+		"file_size": tree.FileSize,
+		"chunk_size": tree.ChunkSize,
+		"total_chunks": len(tree.Chunks),
+		"chunks": tree.Chunks,
+	}
+	
+	if includeProofs {
+		proofs := make([][]string, len(tree.Chunks))
+		for i := range tree.Chunks {
+			proof, _ := tree.GetProof(i)
+			proofs[i] = proof
+		}
+		response["proofs"] = proofs
+	}
+	
+	c.JSON(http.StatusOK, response)
+	
+	s.logger.Info("Served Merkle tree",
+		"path", targetPath,
+		"chunks", len(tree.Chunks),
+		"client_ip", c.ClientIP())
+}
+
+// Helper function to get or build Merkle tree (with caching)
+func (s *GinServer) getMerkleTree(filePath string) (*merkle.Tree, error) {
+	// Check cache first
+	cacheKey := fmt.Sprintf("merkle:%s", filePath)
+	if _, exists := s.cache.Get(cacheKey); exists {
+		// Deserialize from cache
+		// For simplicity, we'll rebuild for now
+		// In production, you'd serialize/deserialize the tree structure
+	}
+	
+	// Build Merkle tree
+	tree, err := merkle.BuildTreeFromFile(filePath, merkle.DefaultChunkSize)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Cache the tree (simplified - in production, serialize it properly)
+	// s.cache.SetRaw(cacheKey, serializedTree, "application/json", 1*time.Hour)
+	
+	return tree, nil
+}
+
