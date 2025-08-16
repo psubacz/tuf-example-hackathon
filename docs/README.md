@@ -24,6 +24,14 @@ This directory contains comprehensive documentation for the TUF (The Update Fram
 
 - **[Multi-Repository Guide](multi-repository-guide.md)**: Complete guide for managing multiple TUF repositories with namespace-based isolation, including setup, API usage, and client configuration
 
+### Authentication & Security
+
+- **[Authentication Guide](authentication-guide.md)**: Complete guide for JWT tokens, API keys, user management, role-based access control, and security best practices
+
+### Enterprise Features
+
+- **[Enterprise Features Guide](enterprise-features.md)**: Production-ready features including webhooks, circuit breakers, request coalescing, storage backends, retry logic, and high-availability configurations
+
 ### Deployment Guides
 
 - **[Deployment Guide](deployment.md)**: Comprehensive deployment documentation covering local development, containerization, Kubernetes, and production considerations

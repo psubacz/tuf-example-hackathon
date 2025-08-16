@@ -11,7 +11,8 @@
       "Bash(skaffold dev:*)",
       "Bash(cat:*)",
       "Bash(./tuf-server:*)",
-      "Bash(golangci-lint run:*)"
+      "Bash(golangci-lint run:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

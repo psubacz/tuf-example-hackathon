@@ -222,10 +222,20 @@ func DefaultConfig() *Config {
 		},
 		
 		Auth: AuthConfig{
-			Enabled:       false, // Disabled by default
+			Enabled:       true, // Enable authentication by default
+			JWTSecret:     "change-this-secret-in-production-use-at-least-32-chars",
 			JWTExpiration: "24h",
-			APIKeys:       make(map[string]string),
-			AdminUsers:    []AdminUser{},
+			APIKeys: map[string]string{
+				"admin-key-example": "Default admin API key - change in production",
+			},
+			AdminUsers: []AdminUser{
+				{
+					Username:    "admin",
+					Password:    "changeme", // Change in production!
+					Role:        "admin",
+					Permissions: []string{"*"},
+				},
+			},
 		},
 		
 		Storage: StorageConfig{
@@ -245,13 +255,13 @@ func DefaultConfig() *Config {
 		},
 		
 		Coalescing: CoalescingConfig{
-			Enabled: false,
+			Enabled: true, // Enable request coalescing for better performance
 			TTL:     5 * time.Second,
 			MaxWait: 30 * time.Second,
 		},
 		
 		CircuitBreaker: CircuitBreakerConfig{
-			Enabled:     false,
+			Enabled:     true, // Enable circuit breakers for resilience
 			MaxRequests: 3,
 			Interval:    60 * time.Second,
 			Timeout:     30 * time.Second,
@@ -260,7 +270,7 @@ func DefaultConfig() *Config {
 		},
 		
 		Retry: RetryConfig{
-			Enabled:        false,
+			Enabled:        true, // Enable retry logic for better resilience
 			MaxRetries:     3,
 			InitialDelay:   100 * time.Millisecond,
 			MaxDelay:       10 * time.Second,

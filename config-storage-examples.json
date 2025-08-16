@@ -1,0 +1,87 @@
+{
+  "storage_configurations": {
+    "filesystem": {
+      "description": "Local filesystem storage (default)",
+      "config": {
+        "type": "filesystem",
+        "properties": {
+          "base_path": "./tuf-repository"
+        }
+      }
+    },
+    "s3": {
+      "description": "AWS S3 storage backend",
+      "config": {
+        "type": "s3",
+        "properties": {
+          "bucket": "my-tuf-repository",
+          "prefix": "tuf/",
+          "region": "us-east-1",
+          "endpoint": ""
+        }
+      }
+    },
+    "s3_compatible": {
+      "description": "S3-compatible storage (MinIO, etc.)",
+      "config": {
+        "type": "s3",
+        "properties": {
+          "bucket": "tuf-repo",
+          "prefix": "repositories/",
+          "region": "us-east-1",
+          "endpoint": "https://minio.example.com",
+          "force_path_style": true
+        }
+      }
+    }
+  },
+  "example_configs": {
+    "production_s3": {
+      "storage": {
+        "type": "s3",
+        "properties": {
+          "bucket": "production-tuf-repo",
+          "prefix": "v1/",
+          "region": "us-west-2"
+        }
+      },
+      "auth": {
+        "enabled": true,
+        "jwt_secret": "production-secret-key-32-chars-min",
+        "api_keys": {
+          "prod-admin-key": "Production admin access",
+          "ci-service-key": "CI/CD pipeline access"
+        }
+      },
+      "circuit_breaker": {
+        "enabled": true,
+        "max_requests": 5,
+        "interval": "60s",
+        "timeout": "30s",
+        "threshold": 0.6
+      },
+      "coalescing": {
+        "enabled": true,
+        "ttl": "5s",
+        "max_wait": "30s"
+      }
+    },
+    "development_local": {
+      "storage": {
+        "type": "filesystem",
+        "properties": {
+          "base_path": "./dev-repository"
+        }
+      },
+      "auth": {
+        "enabled": false
+      },
+      "circuit_breaker": {
+        "enabled": false
+      },
+      "coalescing": {
+        "enabled": false
+      }
+    }
+  }
+}
