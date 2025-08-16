@@ -320,51 +320,213 @@ func (s *GinServer) rootHandler(c *gin.Context) {
 }
 
 func (s *GinServer) rootMetadataHandler(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Not implemented yet"})
+	filePath := filepath.Join(s.config.RepositoryPath, "metadata", "root.json")
+	
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		s.logger.Warn("Root metadata not found")
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Root metadata not found",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Set caching headers for root metadata (short TTL)
+	c.Header("Cache-Control", "public, max-age=60")
+	c.Header("Content-Type", "application/json")
+	
+	s.logger.Info("Serving root metadata", "client_ip", c.ClientIP())
+	c.File(filePath)
 }
 
 func (s *GinServer) timestampMetadataHandler(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Not implemented yet"})
+	filePath := filepath.Join(s.config.RepositoryPath, "metadata", "timestamp.json")
+	
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		s.logger.Warn("Timestamp metadata not found")
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Timestamp metadata not found",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Timestamp should have very short cache (5 seconds) for freshness
+	c.Header("Cache-Control", "public, max-age=5")
+	c.Header("Content-Type", "application/json")
+	
+	s.logger.Info("Serving timestamp metadata", "client_ip", c.ClientIP())
+	c.File(filePath)
 }
 
 func (s *GinServer) snapshotMetadataHandler(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Not implemented yet"})
+	filePath := filepath.Join(s.config.RepositoryPath, "metadata", "snapshot.json")
+	
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		s.logger.Warn("Snapshot metadata not found")
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Snapshot metadata not found",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Snapshot can have moderate cache (5 minutes)
+	c.Header("Cache-Control", "public, max-age=300")
+	c.Header("Content-Type", "application/json")
+	
+	s.logger.Info("Serving snapshot metadata", "client_ip", c.ClientIP())
+	c.File(filePath)
 }
 
 func (s *GinServer) targetsMetadataHandler(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Not implemented yet"})
+	filePath := filepath.Join(s.config.RepositoryPath, "metadata", "targets.json")
+	
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		s.logger.Warn("Targets metadata not found")
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Targets metadata not found",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Targets can have longer cache (1 hour)
+	c.Header("Cache-Control", "public, max-age=3600")
+	c.Header("Content-Type", "application/json")
+	
+	s.logger.Info("Serving targets metadata", "client_ip", c.ClientIP())
+	c.File(filePath)
 }
 
 func (s *GinServer) versionedRootHandler(c *gin.Context) {
 	version := c.Param("version")
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error": "Not implemented yet",
-		"version": version,
-	})
+	
+	// Versioned root files are typically named like "1.root.json", "2.root.json", etc.
+	fileName := fmt.Sprintf("%s.root.json", version)
+	filePath := filepath.Join(s.config.RepositoryPath, "metadata", fileName)
+	
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		s.logger.Warn("Versioned root metadata not found", "version", version)
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Versioned root metadata not found",
+			"version": version,
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Versioned roots can have longer cache since they're immutable
+	c.Header("Cache-Control", "public, max-age=86400, immutable")
+	c.Header("Content-Type", "application/json")
+	
+	s.logger.Info("Serving versioned root metadata", "version", version, "client_ip", c.ClientIP())
+	c.File(filePath)
 }
 
 func (s *GinServer) delegatedRoleHandler(c *gin.Context) {
 	role := c.Param("role")
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error": "Not implemented yet", 
-		"role": role,
-	})
+	
+	// Security check: prevent path traversal
+	if strings.Contains(role, "..") || strings.Contains(role, "/") {
+		s.logger.Warn("Invalid delegated role requested", "role", role)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid role name",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	fileName := fmt.Sprintf("%s.json", role)
+	filePath := filepath.Join(s.config.RepositoryPath, "metadata", "delegated", fileName)
+	
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		s.logger.Warn("Delegated role metadata not found", "role", role)
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Delegated role metadata not found",
+			"role": role,
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Delegated roles can have moderate cache
+	c.Header("Cache-Control", "public, max-age=3600")
+	c.Header("Content-Type", "application/json")
+	
+	s.logger.Info("Serving delegated role metadata", "role", role, "client_ip", c.ClientIP())
+	c.File(filePath)
 }
 
 func (s *GinServer) downloadTargetHandler(c *gin.Context) {
-	filepath := c.Param("filepath")
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error": "Not implemented yet",
-		"filepath": filepath,
-	})
+	targetPath := c.Param("filepath")
+	
+	// Security check: prevent path traversal
+	if strings.Contains(targetPath, "..") {
+		s.logger.Warn("Invalid target path requested", "path", targetPath)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid target path",
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Remove leading slash if present
+	targetPath = strings.TrimPrefix(targetPath, "/")
+	filePath := filepath.Join(s.config.RepositoryPath, "targets", targetPath)
+	
+	fileInfo, err := os.Stat(filePath)
+	if os.IsNotExist(err) {
+		s.logger.Warn("Target file not found", "path", targetPath)
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Target file not found",
+			"path": targetPath,
+			"request_id": c.GetString("request_id"),
+		})
+		return
+	}
+	
+	// Set appropriate content type
+	contentType := getContentTypeByExt(filepath.Ext(targetPath))
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(targetPath)))
+	c.Header("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
+	c.Header("Cache-Control", "public, max-age=3600")
+	
+	s.logger.Info("Serving target file", "path", targetPath, "size", fileInfo.Size(), "client_ip", c.ClientIP())
+	c.File(filePath)
 }
 
 func (s *GinServer) checkTargetHandler(c *gin.Context) {
-	filepath := c.Param("filepath")
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error": "Not implemented yet",
-		"filepath": filepath,
-	})
+	targetPath := c.Param("filepath")
+	
+	// Security check: prevent path traversal
+	if strings.Contains(targetPath, "..") {
+		s.logger.Warn("Invalid target path requested", "path", targetPath)
+		c.Status(http.StatusBadRequest)
+		return
+	}
+	
+	// Remove leading slash if present
+	targetPath = strings.TrimPrefix(targetPath, "/")
+	filePath := filepath.Join(s.config.RepositoryPath, "targets", targetPath)
+	
+	fileInfo, err := os.Stat(filePath)
+	if os.IsNotExist(err) {
+		s.logger.Warn("Target file not found", "path", targetPath)
+		c.Status(http.StatusNotFound)
+		return
+	}
+	
+	// Set headers for HEAD request
+	contentType := getContentTypeByExt(filepath.Ext(targetPath))
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
+	c.Header("Last-Modified", fileInfo.ModTime().UTC().Format(http.TimeFormat))
+	c.Header("Cache-Control", "public, max-age=3600")
+	
+	s.logger.Info("Target file check", "path", targetPath, "exists", true, "size", fileInfo.Size())
+	c.Status(http.StatusOK)
 }
 
 func (s *GinServer) addTargetHandler(c *gin.Context) {
