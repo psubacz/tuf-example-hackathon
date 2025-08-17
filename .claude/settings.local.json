@@ -12,7 +12,8 @@
       "Bash(cat:*)",
       "Bash(./tuf-server:*)",
       "Bash(golangci-lint run:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(./tuf-cli --help)"
     ],
     "deny": [],
     "ask": []

@@ -295,7 +295,7 @@ func (s *GinServer) setupRoutes() {
 		api.GET("/info", s.infoHandler)
 	}
 
-	// TUF metadata endpoints
+	// TUF metadata endpoints (default repository)
 	metadata := s.router.Group("/metadata")
 	{
 		metadata.GET("/root.json", s.rootMetadataHandler)
@@ -305,9 +305,19 @@ func (s *GinServer) setupRoutes() {
 		metadata.GET("/:version/root.json", s.versionedRootHandler)
 		metadata.GET("/delegated/:role.json", s.delegatedRoleHandler)
 	}
+	
+	// Namespace-based metadata endpoints (separate group to avoid conflicts)
+	repoMetadata := s.router.Group("/repos/:namespace/:name/metadata")
+	{
+		repoMetadata.GET("/root.json", s.namespacedRootMetadataHandler)
+		repoMetadata.GET("/timestamp.json", s.namespacedTimestampMetadataHandler)
+		repoMetadata.GET("/snapshot.json", s.namespacedSnapshotMetadataHandler)
+		repoMetadata.GET("/targets.json", s.namespacedTargetsMetadataHandler)
+		repoMetadata.GET("/:version/root.json", s.namespacedVersionedRootHandler)
+		repoMetadata.GET("/delegated/:role.json", s.namespacedDelegatedRoleHandler)
+	}
 
-	// TUF targets endpoints
-	// Use different base paths to avoid routing conflicts
+	// TUF targets endpoints (default repository)
 	s.router.GET("/chunk/:index/*filepath", s.downloadChunkHandler)
 	s.router.GET("/chunked/*filepath", s.chunkedDownloadHandler)
 	s.router.GET("/merkle/*filepath", s.getMerkleTreeHandler)
@@ -318,6 +328,18 @@ func (s *GinServer) setupRoutes() {
 		targets.GET("/*filepath", s.downloadTargetHandler)
 		targets.HEAD("/*filepath", s.checkTargetHandler)
 	}
+	
+	// Namespace-based targets endpoints (separate group to avoid conflicts)
+	repoTargets := s.router.Group("/repos/:namespace/:name/targets")
+	{
+		repoTargets.GET("/*filepath", s.namespacedDownloadTargetHandler)
+		repoTargets.HEAD("/*filepath", s.namespacedCheckTargetHandler)
+	}
+	
+	// Namespace-based chunk and merkle endpoints
+	s.router.GET("/repos/:namespace/:name/chunk/:index/*filepath", s.namespacedDownloadChunkHandler)
+	s.router.GET("/repos/:namespace/:name/chunked/*filepath", s.namespacedChunkedDownloadHandler)
+	s.router.GET("/repos/:namespace/:name/merkle/*filepath", s.namespacedGetMerkleTreeHandler)
 
 	// Admin API endpoints (protected with authentication)
 	admin := s.router.Group("/admin")
@@ -347,6 +369,10 @@ func (s *GinServer) setupRoutes() {
 	
 	// Repository routes  
 	s.setupRepositoryRoutes(api)
+	
+	// Add public repository routes directly to root router for convenience
+	s.router.GET("/repositories", s.listPublicRepositories)
+	s.router.GET("/repositories/:namespace/:name", s.getPublicRepository)
 
 	// Repository middleware for extracting repo from path
 	s.router.Use(s.repositoryMiddleware())
@@ -1788,5 +1814,370 @@ func (s *GinServer) coalescingStatsHandler(c *gin.Context) {
 	}
 	
 	c.JSON(http.StatusOK, s.coalescer.Stats())
+}
+
+// Namespaced handler functions for multi-repository support
+
+func (s *GinServer) namespacedRootMetadataHandler(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	
+	repo, err := s.repoManager.GetRepository(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Repository not found",
+			"namespace": namespace,
+			"name": name,
+		})
+		return
+	}
+	
+	s.serveMetadataForRepository(c, repo, "root.json")
+}
+
+func (s *GinServer) namespacedTimestampMetadataHandler(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	
+	repo, err := s.repoManager.GetRepository(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Repository not found",
+			"namespace": namespace,
+			"name": name,
+		})
+		return
+	}
+	
+	s.serveMetadataForRepository(c, repo, "timestamp.json")
+}
+
+func (s *GinServer) namespacedSnapshotMetadataHandler(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	
+	repo, err := s.repoManager.GetRepository(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Repository not found",
+			"namespace": namespace,
+			"name": name,
+		})
+		return
+	}
+	
+	s.serveMetadataForRepository(c, repo, "snapshot.json")
+}
+
+func (s *GinServer) namespacedTargetsMetadataHandler(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	
+	repo, err := s.repoManager.GetRepository(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Repository not found",
+			"namespace": namespace,
+			"name": name,
+		})
+		return
+	}
+	
+	s.serveMetadataForRepository(c, repo, "targets.json")
+}
+
+func (s *GinServer) namespacedVersionedRootHandler(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	version := c.Param("version")
+	
+	repo, err := s.repoManager.GetRepository(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Repository not found",
+			"namespace": namespace,
+			"name": name,
+		})
+		return
+	}
+	
+	fileName := fmt.Sprintf("%s.root.json", version)
+	s.serveMetadataForRepository(c, repo, fileName)
+}
+
+func (s *GinServer) namespacedDelegatedRoleHandler(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	role := c.Param("role")
+	
+	// Security check: prevent path traversal
+	if strings.Contains(role, "..") || strings.Contains(role, "/") {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid role name",
+		})
+		return
+	}
+	
+	repo, err := s.repoManager.GetRepository(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Repository not found",
+			"namespace": namespace,
+			"name": name,
+		})
+		return
+	}
+	
+	fileName := fmt.Sprintf("delegated/%s.json", role)
+	s.serveMetadataForRepository(c, repo, fileName)
+}
+
+func (s *GinServer) namespacedDownloadTargetHandler(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	targetPath := c.Param("filepath")
+	
+	repo, err := s.repoManager.GetRepository(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Repository not found",
+			"namespace": namespace,
+			"name": name,
+		})
+		return
+	}
+	
+	s.serveTargetForRepository(c, repo, targetPath)
+}
+
+func (s *GinServer) namespacedCheckTargetHandler(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	targetPath := c.Param("filepath")
+	
+	repo, err := s.repoManager.GetRepository(namespace, name)
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	
+	s.checkTargetForRepository(c, repo, targetPath)
+}
+
+func (s *GinServer) namespacedDownloadChunkHandler(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	indexStr := c.Param("index")
+	targetPath := c.Param("filepath")
+	
+	repo, err := s.repoManager.GetRepository(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Repository not found",
+			"namespace": namespace,
+			"name": name,
+		})
+		return
+	}
+	
+	s.serveChunkForRepository(c, repo, indexStr, targetPath)
+}
+
+func (s *GinServer) namespacedChunkedDownloadHandler(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	targetPath := c.Param("filepath")
+	
+	repo, err := s.repoManager.GetRepository(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Repository not found",
+			"namespace": namespace,
+			"name": name,
+		})
+		return
+	}
+	
+	s.serveChunkedDownloadForRepository(c, repo, targetPath)
+}
+
+func (s *GinServer) namespacedGetMerkleTreeHandler(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	targetPath := c.Param("filepath")
+	
+	repo, err := s.repoManager.GetRepository(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Repository not found",
+			"namespace": namespace,
+			"name": name,
+		})
+		return
+	}
+	
+	s.serveMerkleTreeForRepository(c, repo, targetPath)
+}
+
+// Helper functions for repository-specific operations
+
+func (s *GinServer) serveMetadataForRepository(c *gin.Context, repo *repository.Repository, fileName string) {
+	// Get metadata from repository backend
+	metadataPath := fmt.Sprintf("metadata/%s", fileName)
+	reader, err := repo.Backend.Get(context.Background(), metadataPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Metadata not found",
+			"file": fileName,
+		})
+		return
+	}
+	defer reader.Close()
+	
+	// Read content
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to read metadata",
+		})
+		return
+	}
+	
+	// Set appropriate headers
+	c.Header("Content-Type", "application/json")
+	c.Header("Cache-Control", "public, max-age=300") // 5 minutes cache
+	
+	c.Data(http.StatusOK, "application/json", content)
+}
+
+func (s *GinServer) serveTargetForRepository(c *gin.Context, repo *repository.Repository, targetPath string) {
+	// Remove leading slash if present
+	targetPath = strings.TrimPrefix(targetPath, "/")
+	
+	// Get target from repository backend
+	fullPath := fmt.Sprintf("targets/%s", targetPath)
+	reader, err := repo.Backend.Get(context.Background(), fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Target not found",
+			"path": targetPath,
+		})
+		return
+	}
+	defer reader.Close()
+	
+	// Stream the file
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(targetPath)))
+	
+	_, err = io.Copy(c.Writer, reader)
+	if err != nil {
+		s.logger.Error("Failed to stream target file", "error", err, "path", targetPath)
+	}
+}
+
+func (s *GinServer) checkTargetForRepository(c *gin.Context, repo *repository.Repository, targetPath string) {
+	// Remove leading slash if present
+	targetPath = strings.TrimPrefix(targetPath, "/")
+	
+	// Check if target exists in repository backend
+	fullPath := fmt.Sprintf("targets/%s", targetPath)
+	exists, err := repo.Backend.Exists(context.Background(), fullPath)
+	if err != nil || !exists {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	
+	c.Status(http.StatusOK)
+}
+
+func (s *GinServer) serveChunkForRepository(c *gin.Context, repo *repository.Repository, indexStr string, targetPath string) {
+	// Parse chunk index
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid chunk index",
+		})
+		return
+	}
+	
+	// Remove leading slash if present
+	targetPath = strings.TrimPrefix(targetPath, "/")
+	
+	// Get target from repository backend
+	fullPath := fmt.Sprintf("targets/%s", targetPath)
+	reader, err := repo.Backend.Get(context.Background(), fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Target not found",
+			"path": targetPath,
+		})
+		return
+	}
+	defer reader.Close()
+	
+	// For now, implement basic chunking (this could be enhanced with proper Merkle tree support)
+	chunkSize := int64(1024 * 1024) // 1MB chunks
+	offset := int64(index) * chunkSize
+	
+	// Seek to chunk position
+	if seeker, ok := reader.(io.Seeker); ok {
+		_, err = seeker.Seek(offset, io.SeekStart)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid chunk position",
+			})
+			return
+		}
+	}
+	
+	// Read chunk
+	chunk := make([]byte, chunkSize)
+	n, err := reader.Read(chunk)
+	if err != nil && err != io.EOF {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to read chunk",
+		})
+		return
+	}
+	
+	if n == 0 {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Chunk not found",
+		})
+		return
+	}
+	
+	c.Header("Content-Type", "application/octet-stream")
+	c.Data(http.StatusOK, "application/octet-stream", chunk[:n])
+}
+
+func (s *GinServer) serveChunkedDownloadForRepository(c *gin.Context, repo *repository.Repository, targetPath string) {
+	// For now, just serve the full file (chunked downloading would require more complex implementation)
+	s.serveTargetForRepository(c, repo, targetPath)
+}
+
+func (s *GinServer) serveMerkleTreeForRepository(c *gin.Context, repo *repository.Repository, targetPath string) {
+	// Remove leading slash if present
+	targetPath = strings.TrimPrefix(targetPath, "/")
+	
+	// Get target from repository backend
+	fullPath := fmt.Sprintf("targets/%s", targetPath)
+	reader, err := repo.Backend.Get(context.Background(), fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Target not found",
+			"path": targetPath,
+		})
+		return
+	}
+	defer reader.Close()
+	
+	// For now, return a simple response (full Merkle tree implementation would be more complex)
+	c.JSON(http.StatusOK, gin.H{
+		"file": targetPath,
+		"merkle_tree": "not implemented for repository backends",
+		"message": "Merkle tree generation requires file system access",
+	})
 }
 

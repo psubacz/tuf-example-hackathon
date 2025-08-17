@@ -375,6 +375,11 @@ func (fs *FilesystemBackend) fullPath(path string) string {
 	return filepath.Join(fs.basePath, clean)
 }
 
+// GetBasePath returns the base path of the filesystem backend
+func (fs *FilesystemBackend) GetBasePath() string {
+	return fs.basePath
+}
+
 func (fs *FilesystemBackend) calculateETag(info os.FileInfo) string {
 	// Simple ETag based on size and modification time
 	data := fmt.Sprintf("%d-%d", info.Size(), info.ModTime().Unix())

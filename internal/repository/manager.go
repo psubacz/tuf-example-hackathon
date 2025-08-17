@@ -3,13 +3,17 @@ package repository
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"tuf-golang-project/internal/logger"
 	"tuf-golang-project/internal/storage"
 )
 
@@ -40,16 +44,28 @@ type Manager struct {
 	repositories map[string]*Repository
 	backends     map[string]storage.Backend
 	defaultBackend storage.Backend
+	logger       *slog.Logger
 	mu           sync.RWMutex
 }
 
 // NewManager creates a new repository manager
 func NewManager(defaultBackend storage.Backend) *Manager {
-	return &Manager{
+	m := &Manager{
 		repositories:   make(map[string]*Repository),
 		backends:       make(map[string]storage.Backend),
 		defaultBackend: defaultBackend,
+		logger:         logger.Logger,
 	}
+	
+	// Load existing repositories from storage
+	if err := m.loadRepositories(); err != nil {
+		// Log error but don't fail - allows server to start even if some repos are corrupted
+		m.logger.Warn("Failed to load existing repositories", "error", err)
+	} else {
+		m.logger.Info("Repository manager initialized", "loaded_repos", len(m.repositories))
+	}
+	
+	return m
 }
 
 // CreateRepository creates a new repository
@@ -90,6 +106,14 @@ func (m *Manager) CreateRepository(namespace, name string, config *RepositoryCon
 	}
 
 	m.repositories[repoID] = repo
+	
+	// Persist repository metadata
+	if err := m.saveRepositoryMetadata(repo); err != nil {
+		// If we can't persist, remove from memory and fail
+		delete(m.repositories, repoID)
+		return nil, fmt.Errorf("failed to persist repository metadata: %w", err)
+	}
+	
 	return repo, nil
 }
 
@@ -138,6 +162,12 @@ func (m *Manager) DeleteRepository(namespace, name string) error {
 	}
 
 	delete(m.repositories, repoID)
+	
+	// Remove persisted repository metadata
+	if err := m.deleteRepositoryMetadata(repo); err != nil {
+		return fmt.Errorf("failed to delete repository metadata: %w", err)
+	}
+	
 	return nil
 }
 
@@ -158,7 +188,8 @@ func (m *Manager) UpdateRepository(namespace, name string, config *RepositoryCon
 	repo.Config = config
 	repo.UpdatedAt = time.Now()
 	
-	return nil
+	// Persist updated repository metadata
+	return m.saveRepositoryMetadata(repo)
 }
 
 // initializeRepository initializes the directory structure for a repository
@@ -378,4 +409,195 @@ func (r *Repository) IsClientAllowed(clientID string) bool {
 		}
 	}
 	return false
+}
+
+// Repository persistence functions
+
+// RepositoryMetadata represents the persistent metadata for a repository
+type RepositoryMetadata struct {
+	Name        string            `json:"name"`
+	Namespace   string            `json:"namespace"`
+	Description string            `json:"description"`
+	Config      *RepositoryConfig `json:"config"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+}
+
+// loadRepositories loads all existing repositories from storage
+func (m *Manager) loadRepositories() error {
+	// List all repository metadata files
+	const metadataPrefix = "_repositories/"
+	
+	// For filesystem backend, we need to check if the directories exist
+	entries, err := m.listRepositoryMetadataFiles()
+	if err != nil {
+		return fmt.Errorf("failed to list repository metadata: %w", err)
+	}
+	
+	for _, entry := range entries {
+		if err := m.loadSingleRepository(entry); err != nil {
+			m.logger.Warn("Failed to load repository", "metadata_path", entry, "error", err)
+			continue
+		}
+		m.logger.Debug("Successfully loaded repository", "metadata_path", entry)
+	}
+	
+	return nil
+}
+
+// listRepositoryMetadataFiles lists all repository metadata files by scanning the storage backend
+func (m *Manager) listRepositoryMetadataFiles() ([]string, error) {
+	// Scan the _repositories directory for all metadata.json files
+	const repositoriesPrefix = "_repositories/"
+	
+	var foundMetadataFiles []string
+	
+	// Check if the storage backend supports filesystem scanning
+	// Handle both direct filesystem backend and retry-wrapped backend
+	var fsBackend *storage.FilesystemBackend
+	if fs, ok := m.defaultBackend.(*storage.FilesystemBackend); ok {
+		fsBackend = fs
+	} else if retryBackend, ok := m.defaultBackend.(*storage.RetryBackend); ok {
+		if fs, ok := retryBackend.GetUnderlyingBackend().(*storage.FilesystemBackend); ok {
+			fsBackend = fs
+		}
+	}
+	
+	if fsBackend != nil {
+		foundMetadataFiles = m.scanFilesystemForRepositories(fsBackend)
+	} else {
+		// For non-filesystem backends (S3, etc.), try common patterns
+		// This is a fallback approach for backends that don't support directory listing
+		foundMetadataFiles = m.scanCommonRepositoryPatterns()
+	}
+	
+	m.logger.Info("Repository discovery completed", "found_count", len(foundMetadataFiles))
+	
+	return foundMetadataFiles, nil
+}
+
+// scanFilesystemForRepositories scans filesystem backend for repository metadata files
+func (m *Manager) scanFilesystemForRepositories(fsBackend *storage.FilesystemBackend) []string {
+	var foundFiles []string
+	
+	// Get the base path from filesystem backend
+	basePath := fsBackend.GetBasePath()
+	repositoriesPath := filepath.Join(basePath, "_repositories")
+	
+	// Walk the _repositories directory to find all metadata.json files
+	err := filepath.Walk(repositoriesPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Continue walking even if some directories are inaccessible
+		}
+		
+		if !info.IsDir() && info.Name() == "metadata.json" {
+			// Convert absolute path to relative path for storage backend
+			relPath, err := filepath.Rel(basePath, path)
+			if err != nil {
+				m.logger.Warn("Failed to get relative path", "path", path, "error", err)
+				return nil
+			}
+			
+			m.logger.Debug("Found repository metadata", "path", relPath)
+			foundFiles = append(foundFiles, relPath)
+		}
+		
+		return nil
+	})
+	
+	if err != nil {
+		m.logger.Debug("Repository directory scan completed with errors", "error", err)
+	}
+	
+	return foundFiles
+}
+
+// scanCommonRepositoryPatterns checks common repository patterns for non-filesystem backends
+func (m *Manager) scanCommonRepositoryPatterns() []string {
+	// Common namespace patterns to check as fallback for non-filesystem backends
+	namespacesToCheck := []string{"prod", "dev", "test", "staging", "default"}
+	repoNamesToCheck := []string{"main", "firmware", "packages", "app", "service"}
+	
+	var foundMetadataFiles []string
+	
+	for _, namespace := range namespacesToCheck {
+		for _, repoName := range repoNamesToCheck {
+			metadataPath := m.getRepositoryMetadataPath(namespace, repoName)
+			
+			// Check if this metadata file exists
+			if exists, _ := m.defaultBackend.Exists(context.Background(), metadataPath); exists {
+				m.logger.Debug("Found repository metadata", "path", metadataPath)
+				foundMetadataFiles = append(foundMetadataFiles, metadataPath)
+			}
+		}
+	}
+	
+	return foundMetadataFiles
+}
+
+// loadSingleRepository loads a single repository from its metadata file
+func (m *Manager) loadSingleRepository(metadataPath string) error {
+	reader, err := m.defaultBackend.Get(context.Background(), metadataPath)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		return err
+	}
+	
+	var metadata RepositoryMetadata
+	if err := json.Unmarshal(content, &metadata); err != nil {
+		return err
+	}
+	
+	// Create repository object from metadata
+	backend := m.getBackendForRepo(metadata.Namespace, metadata.Name)
+	repo := &Repository{
+		Name:        metadata.Name,
+		Namespace:   metadata.Namespace,
+		Description: metadata.Description,
+		Backend:     backend,
+		Config:      metadata.Config,
+		CreatedAt:   metadata.CreatedAt,
+		UpdatedAt:   metadata.UpdatedAt,
+	}
+	
+	repoID := formatRepoID(metadata.Namespace, metadata.Name)
+	m.repositories[repoID] = repo
+	
+	return nil
+}
+
+// saveRepositoryMetadata saves repository metadata to storage
+func (m *Manager) saveRepositoryMetadata(repo *Repository) error {
+	metadata := RepositoryMetadata{
+		Name:        repo.Name,
+		Namespace:   repo.Namespace,
+		Description: repo.Description,
+		Config:      repo.Config,
+		CreatedAt:   repo.CreatedAt,
+		UpdatedAt:   repo.UpdatedAt,
+	}
+	
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	
+	metadataPath := m.getRepositoryMetadataPath(repo.Namespace, repo.Name)
+	return m.defaultBackend.Put(context.Background(), metadataPath, bytes.NewReader(data))
+}
+
+// deleteRepositoryMetadata removes repository metadata from storage
+func (m *Manager) deleteRepositoryMetadata(repo *Repository) error {
+	metadataPath := m.getRepositoryMetadataPath(repo.Namespace, repo.Name)
+	return m.defaultBackend.Delete(context.Background(), metadataPath)
+}
+
+// getRepositoryMetadataPath returns the storage path for repository metadata
+func (m *Manager) getRepositoryMetadataPath(namespace, name string) string {
+	return fmt.Sprintf("_repositories/%s/%s/metadata.json", namespace, name)
 }

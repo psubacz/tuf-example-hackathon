@@ -28,6 +28,11 @@ func NewRetryBackend(backend Backend, config *retry.Config) Backend {
 	}
 }
 
+// GetUnderlyingBackend returns the underlying backend (for type assertions)
+func (rb *RetryBackend) GetUnderlyingBackend() Backend {
+	return rb.backend
+}
+
 // Get retrieves a file with retry logic
 func (r *RetryBackend) Get(ctx context.Context, path string) (io.ReadCloser, error) {
 	var reader io.ReadCloser

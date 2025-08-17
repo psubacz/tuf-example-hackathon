@@ -16,7 +16,9 @@ func (s *GinServer) setupRepositoryRoutes(router *gin.RouterGroup) {
 	admin := router.Group("/admin/repositories")
 	admin.Use(s.authMiddleware())
 	{
+		admin.POST("", s.createRepository)
 		admin.POST("/", s.createRepository)
+		admin.GET("", s.listRepositories)
 		admin.GET("/", s.listRepositories)
 		admin.GET("/:namespace/:name", s.getRepository)
 		admin.PUT("/:namespace/:name", s.updateRepository)
@@ -24,7 +26,7 @@ func (s *GinServer) setupRepositoryRoutes(router *gin.RouterGroup) {
 		admin.GET("/:namespace/:name/stats", s.getRepositoryStats)
 	}
 
-	// Public repository endpoints (with namespace support)
+	// Public repository endpoints (with namespace support) - both API and root level
 	router.GET("/repositories", s.listPublicRepositories)
 	router.GET("/repositories/:namespace/:name", s.getPublicRepository)
 }
