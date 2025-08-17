@@ -33,7 +33,7 @@ deploy:
 
 portForward:
   - resourceType: service
-    resourceName: tuf_server
+    resourceName: tuf-server-tuf-server
     port: 8080
     localPort: 8080
 

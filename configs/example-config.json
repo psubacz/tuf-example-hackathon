@@ -1,4 +1,85 @@
 {
+  "port": 8086,
+  "repository_path": "./tuf-repository",
+  "log_level": "debug",
+  "log_format": "text",
+  "storage": {
+    "type": "filesystem",
+    "properties": {
+      "base_path": "./tuf-repository"
+    }
+  },
+  "tracing": {
+    "enabled": false,
+    "service_name": "tuf-server",
+    "endpoint": "localhost:4318",
+    "sampling_rate": 0.1,
+    "insecure": true,
+    "headers": {}
+  },
+  "coalescing": {
+    "enabled": true,
+    "ttl": "5s",
+    "max_wait": "30s"
+  },
+  "circuit_breaker": {
+    "enabled": true,
+    "max_requests": 3,
+    "interval": "60s",
+    "timeout": "30s",
+    "threshold": 0.5,
+    "min_requests": 5
+  },
+  "retry": {
+    "enabled": true,
+    "max_retries": 3,
+    "initial_delay": "100ms",
+    "max_delay": "10s",
+    "multiplier": 2.0,
+    "jitter_fraction": 0.1
+  },
+  "auth": {
+    "enabled": true,
+    "jwt_secret": "advanced-secret-key-change-this",
+    "jwt_expiration": "24h",
+    "api_keys": {
+      "test-api-key": "Test API Key",
+      "prod-api-key-123": "Production API Key",
+      "prod-admin-key": "Production admin access",
+      "ci-service-key": "CI/CD pipeline access"
+    },
+    "admin_users": [
+      {
+        "username": "admin",
+        "password": "admin123",
+        "role": "admin",
+        "permissions": ["*"]
+      }
+    ]
+  },
+  "cache": {
+    "enabled": true,
+    "ttl": "5m",
+    "max_size": 100,
+    "cleanup_freq": "10m"
+  },
+  "rate_limit": {
+    "enabled": true,
+    "requests": 1000,
+    "window": "1h",
+    "burst_size": 100
+  },
+  "cors": {
+    "enabled": true,
+    "allowed_origins": ["*"],
+    "allowed_methods": ["GET", "POST", "OPTIONS"],
+    "allowed_headers": ["Content-Type", "Authorization"],
+    "max_age": 3600
+  },
+  "metrics": {
+    "enabled": true,
+    "path": "/metrics"
+  },
   "storage_configurations": {
     "filesystem": {
       "description": "Local filesystem storage (default)",
